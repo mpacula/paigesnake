@@ -696,7 +696,7 @@ function resolveCollisions() {
 // ---------------- input ----------------
 const canvas = document.getElementById('c');
 const pointers = new Map(), keys = new Set();
-canvas.addEventListener('pointerdown', e => { pointers.set(e.pointerId, e.clientX < innerWidth / 2 ? -1 : 1); });
+canvas.addEventListener('pointerdown', e => { pointers.set(e.pointerId, e.clientX < innerWidth / 2 ? -1 : 1); music.resume(); });
 const release = e => pointers.delete(e.pointerId);
 window.addEventListener('pointerup', release); window.addEventListener('pointercancel', release);
 window.addEventListener('blur', () => pointers.clear());
@@ -747,7 +747,7 @@ function startGame() {
   updateCamera(0, true);
   state = 'playing';
   menu.classList.add('hidden'); over.classList.add('hidden'); hud.classList.remove('hidden'); muteBtn.classList.remove('hidden');
-  music.init(); music.resume(); music.play(TRACK_NORMAL);
+  music.unlock(); music.init(); music.resume(); music.play(TRACK_NORMAL);
 }
 function gameOver() {
   state = 'over';
@@ -794,9 +794,19 @@ const TW_CH_B = [[Cmaj,2],[Gmaj,2],[Cmaj,2],[Gmaj,2]];
 const TRACK_MAGIC = { bpm: 96, lead: [...TW_A, ...TW_B, ...TW_B, ...TW_A],
   chords: [...TW_CH_A, ...TW_CH_B, ...TW_CH_B, ...TW_CH_A], style: 'magic' };
 
+// iOS mutes Web Audio under the ring/silent switch unless an <audio> element is playing.
+// Looping a silent clip (started inside the user's tap) switches the session to playback mode.
+const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
 const music = {
   ctx: null, master: null, enabled: true, track: null, timer: null,
-  voices: [], noise: null,
+  voices: [], noise: null, silent: null,
+  unlock() {
+    if (!this.silent) {
+      const a = document.createElement('audio');
+      a.setAttribute('playsinline', ''); a.loop = true; a.src = SILENT_WAV; this.silent = a;
+    }
+    const pr = this.silent.play(); if (pr && pr.catch) pr.catch(() => {});
+  },
   init() {
     if (this.ctx) return;
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -808,7 +818,7 @@ const music = {
     this.noise = buf;
     this.timer = setInterval(() => this.tick(), 60);
   },
-  resume() { if (this.ctx && this.ctx.state !== 'running') this.ctx.resume(); },
+  resume() { if (this.ctx && this.ctx.state !== 'running') { const pr = this.ctx.resume(); if (pr && pr.catch) pr.catch(() => {}); } },
   setEnabled(on) {
     this.enabled = on;
     if (this.master) this.master.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.05);
@@ -898,9 +908,10 @@ const music = {
 const menu = document.getElementById('menu'), over = document.getElementById('over'), hud = document.getElementById('hud');
 const scoreEl = document.getElementById('score'), lenEl = document.getElementById('len'), aliveEl = document.getElementById('alive');
 const muteBtn = document.getElementById('mute'), musicChk = document.getElementById('musicOn');
-muteBtn.addEventListener('click', () => music.setEnabled(!music.enabled));
+muteBtn.addEventListener('click', () => { music.setEnabled(!music.enabled); if (music.enabled) { music.unlock(); music.resume(); } });
 musicChk.addEventListener('change', () => music.setEnabled(musicChk.checked));
-document.addEventListener('visibilitychange', () => { if (music.ctx) { if (document.hidden) music.ctx.suspend(); else if (state !== 'menu') music.ctx.resume(); } });
+document.addEventListener('visibilitychange', () => { if (music.ctx) { if (document.hidden) music.ctx.suspend(); else if (state !== 'menu') { music.resume(); music.unlock(); } } });
+document.getElementById('again').addEventListener('click', () => { music.unlock(); music.resume(); });
 document.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => {
   document.querySelectorAll('.card').forEach(x => x.classList.remove('sel')); c.classList.add('sel'); world = c.dataset.world;
 }));
