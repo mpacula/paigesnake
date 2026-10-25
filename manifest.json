@@ -1,0 +1,10 @@
+{
+  "name": "Paige's Snake",
+  "short_name": "Snake",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#9fd3ff",
+  "theme_color": "#9fd3ff",
+  "icons": [{ "src": "icon.png", "sizes": "512x512", "type": "image/png" }]
+}

@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Snake">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Paige's Snake</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;
+    font-family:-apple-system,"SF Pro Rounded",system-ui,sans-serif;
+    touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  canvas{display:block;width:100%;height:100%}
+  .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:18px;background:rgba(10,30,50,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    color:#fff;text-align:center;padding:24px;padding-top:max(24px,env(safe-area-inset-top))}
+  .hidden{display:none !important}
+  h1{font-size:clamp(34px,7vw,68px);margin:0;text-shadow:0 4px 18px rgba(0,0,0,.4)}
+  .cards{display:flex;gap:16px}
+  .card{width:150px;padding:18px 10px;border-radius:22px;background:rgba(255,255,255,.14);
+    border:3px solid transparent;font-size:20px;font-weight:700;cursor:pointer}
+  .card .emoji{font-size:56px;display:block}
+  .card.sel{border-color:#ffd34a;background:rgba(255,255,255,.28)}
+  .row{font-size:20px;display:flex;align-items:center;gap:12px}
+  input[type=range]{width:220px}
+  .btn{font-size:28px;font-weight:800;padding:16px 56px;border-radius:999px;border:0;background:#ffd34a;
+    color:#2b2100;box-shadow:0 6px 0 #c9a21d;cursor:pointer}
+  .btn:active{transform:translateY(4px);box-shadow:0 2px 0 #c9a21d}
+  .btn.secondary{background:rgba(255,255,255,.2);color:#fff;box-shadow:none;font-size:20px;padding:12px 32px}
+  #hud{position:fixed;top:max(12px,env(safe-area-inset-top));left:0;right:0;display:flex;justify-content:center;
+    gap:28px;color:#fff;font-weight:800;font-size:22px;text-shadow:0 2px 6px rgba(0,0,0,.6);pointer-events:none}
+  .hint{opacity:.85;font-size:17px;max-width:440px;line-height:1.4}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" class="hidden">
+  <span>🍎 <b id="score">0</b></span>
+  <span>📏 <b id="len">6</b></span>
+  <span>🐍 <b id="alive">0</b></span>
+</div>
+
+<div id="menu" class="overlay">
+  <h1>🐍 Paige's Snake</h1>
+  <div class="cards">
+    <div class="card sel" data-world="forest"><span class="emoji">🌲</span>Forest</div>
+    <div class="card" data-world="beach"><span class="emoji">🏖️</span>Beach</div>
+  </div>
+  <div class="row"><label for="cpu">Other snakes</label><input id="cpu" type="range" min="0" max="10" value="4"><b id="cpuVal">4</b></div>
+  <button id="play" class="btn">Play</button>
+  <p class="hint">Touch the left or right side of the screen to turn. Touch both sides to go fast.
+    Eat snacks to grow. Bump another snake's body with your head to eat it!</p>
+</div>
+
+<div id="over" class="overlay hidden">
+  <h1>Yum! You got eaten 😋</h1>
+  <div class="row" id="finalScore"></div>
+  <button id="again" class="btn">Play again</button>
+  <button id="toMenu" class="btn secondary">Change world</button>
+</div>
+
+<script type="module">
+import * as THREE from './vendor/three.module.min.js';
+
+// ---------------- config ----------------
+const R = 95;                // playable radius
+const TERRAIN_SIZE = 360;
+const SEG_SPACING = 1.0, SEG_R = 0.95, HEAD_R = 1.2, MAX_SEG = 400, START_LEN = 6;
+const FOOD_COUNT = 45;
+const PLAYER_SPEED = 14, CPU_SPEED = 11.5, TURN_RATE = 2.6;
+const WORLDS = {
+  forest: { sky: 0x9fd3ff, fog: 0xb4dcf5, fogNear: 70, fogFar: 240, hemiSky: 0xcfe8ff, hemiGround: 0x3f6b2a },
+  beach:  { sky: 0x7ec8ff, fog: 0xd2ebff, fogNear: 90, fogFar: 270, hemiSky: 0xdff2ff, hemiGround: 0xc9b57a },
+};
+const CPU_COLORS = [0xff8c42, 0x9b5de5, 0x3a86ff, 0xff5d8f, 0x2ec4b6, 0xffd166, 0xef476f, 0x8d6e63, 0x06d6a0, 0xf4a261];
+
+// ---------------- state ----------------
+let world = 'forest', cpuCount = 4, seed = 0;
+let scene, camera, renderer, clock;
+let snakes = [], foods = [], player = null;
+let state = 'menu', score = 0, time = 0;
+let waterMesh = null, cloudMesh = null;
+
+// ---------------- noise / terrain ----------------
+function hash(ix, iz) {
+  let n = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263)) | 0;
+  n = Math.imul(n ^ (n >>> 13), 1274126177);
+  n ^= n >>> 16;
+  return (n >>> 0) / 4294967296;
+}
+function vnoise(x, z) {
+  const ix = Math.floor(x), iz = Math.floor(z);
+  const fx = x - ix, fz = z - iz;
+  const sx = fx * fx * (3 - 2 * fx), sz = fz * fz * (3 - 2 * fz);
+  const a = hash(ix, iz), b = hash(ix + 1, iz), c = hash(ix, iz + 1), d = hash(ix + 1, iz + 1);
+  const top = a + (b - a) * sx, bot = c + (d - c) * sx;
+  return top + (bot - top) * sz;
+}
+function fbm(x, z) { // -0.5 .. 0.5
+  let v = 0, amp = 0.5, f = 1, sum = 0;
+  for (let i = 0; i < 4; i++) { v += vnoise(x * f, z * f) * amp; sum += amp; amp *= 0.5; f *= 2.1; }
+  return v / sum - 0.5;
+}
+function heightAt(x, z) {
+  const r = Math.hypot(x, z);
+  if (world === 'forest') {
+    let h = fbm(x * 0.022 + seed, z * 0.022 + seed) * 7;
+    if (r > R) { const t = (r - R) / 40; h += t * t * 45; }
+    return h;
+  }
+  let h = 2.2 + fbm(x * 0.02 + seed, z * 0.02 + seed) * 3;
+  const r0 = R * 0.92;
+  if (r > r0) { const t = (r - r0) / 18; h -= Math.pow(t, 1.4) * 7; }
+  return h;
+}
+const tmpC = new THREE.Color();
+function groundColor(x, z, h, c) {
+  const n = fbm(x * 0.08 + 7, z * 0.08 + 3) + 0.5;
+  if (world === 'forest') {
+    c.setRGB(0.32, 0.58, 0.19).lerp(tmpC.setRGB(0.17, 0.40, 0.12), n);
+    if (h > 10) c.lerp(tmpC.setRGB(0.45, 0.42, 0.38), Math.min(1, (h - 10) / 14));
+    if (h > 26) c.lerp(tmpC.setRGB(0.95, 0.96, 1.0), Math.min(1, (h - 26) / 8));
+  } else {
+    c.setRGB(0.96, 0.88, 0.65).lerp(tmpC.setRGB(0.88, 0.78, 0.55), n);
+    if (h < 1.0) c.lerp(tmpC.setRGB(0.72, 0.64, 0.45), Math.min(1, (1.0 - h) / 1.5));
+    if (h < -0.5) c.lerp(tmpC.setRGB(0.35, 0.55, 0.5), Math.min(1, (-0.5 - h) / 3));
+  }
+}
+
+// ---------------- procedural textures ----------------
+function makeTex(size, fn, repeat) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = size;
+  const ctx = cv.getContext('2d'); const img = ctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const i = (y * size + x) * 4; const [r, g, b] = fn(x, y, size);
+    img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat, repeat);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const TAU = Math.PI * 2;
+const groundTex = makeTex(256, (x, y, s) => {
+  const v = 220 + (Math.random() - 0.5) * 44 + Math.sin(x / s * TAU * 2 + 1.3) * Math.sin(y / s * TAU * 3) * 3;
+  return [v, v, v];
+}, 48);
+const barkTex = makeTex(128, (x, y, s) => {
+  const v = 180 + Math.sin(x / s * TAU * 6) * 30 + Math.sin(x / s * TAU * 13 + y * 0.1) * 15 + (Math.random() - 0.5) * 40;
+  return [v, v, v];
+}, 1);
+const waterTex = makeTex(256, (x, y, s) => {
+  const v = 232 + Math.sin(x / s * TAU * 4 + Math.sin(y / s * TAU * 3) * 2) * 14 + (Math.random() - 0.5) * 10;
+  return [v, v, v + 10];
+}, 40);
+
+// ---------------- shared geometry / materials ----------------
+const frondGeo = (() => {
+  const g = new THREE.PlaneGeometry(1.5, 5, 1, 8);
+  g.rotateX(-Math.PI / 2); g.translate(0, 0, 2.5);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) { const t = p.getZ(i) / 5; p.setY(i, -t * t * 2.4); p.setX(i, p.getX(i) * (1 - 0.6 * t)); }
+  g.computeVertexNormals();
+  return g;
+})();
+const palmTrunkGeo = new THREE.TubeGeometry(
+  new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.3, 4.5, 0), new THREE.Vector3(2.2, 8, 0)),
+  10, 0.38, 7, false);
+const GEO = {
+  cone: new THREE.ConeGeometry(1, 1, 7), cyl: new THREE.CylinderGeometry(0.8, 1, 1, 7),
+  ico: new THREE.IcosahedronGeometry(1, 1), ico0: new THREE.IcosahedronGeometry(1, 0),
+  dodec: new THREE.DodecahedronGeometry(1, 0), sphere: new THREE.SphereGeometry(1, 10, 8),
+  box: new THREE.BoxGeometry(1, 1, 1), tuft: new THREE.ConeGeometry(1, 1, 4),
+  frond: frondGeo, palmTrunk: palmTrunkGeo,
+};
+const lam = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+const MAT = {
+  bark: lam(0x9c6b48, { map: barkTex }), pine: lam(0x2f7a3a, { flatShading: true }), pine2: lam(0x3d8f46, { flatShading: true }),
+  leaf: lam(0x4caf50, { flatShading: true }), bush: lam(0x3d8b40, { flatShading: true }), bushBeach: lam(0x5c9e4a, { flatShading: true }),
+  rock: lam(0x8a8a8a, { flatShading: true }), grass: lam(0x7fbf4a), grassBeach: lam(0xc2cf7d),
+  mushStem: lam(0xf1e8d8), mushCap: lam(0xd84a3a), palmLeaf: lam(0x3fa34d, { side: THREE.DoubleSide }),
+  coco: lam(0x6b4a2b), pole: lam(0xf2f2f2), shell: lam(0xf7dcd0), shell2: lam(0xf5c6a5), star: lam(0xff8a5b),
+  cloud: lam(0xffffff), umb0: lam(0xff5a5a), umb1: lam(0x4a90ff), umb2: lam(0xffd34a),
+  towel0: lam(0x4ad4ff), towel1: lam(0xff9ad5), towel2: lam(0xc6ff7a),
+};
+
+// ---------------- instancing collector ----------------
+const buckets = new Map();
+function part(group, geoKey, matKey, x, y, z, sx, sy, sz, rx = 0, ry = 0, rz = 0) {
+  const m = new THREE.Mesh(GEO[geoKey], MAT[matKey]);
+  m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.set(rx, ry, rz);
+  m.userData.key = geoKey + '|' + matKey; group.add(m); return m;
+}
+function collect(group) {
+  group.updateMatrixWorld(true);
+  group.traverse(o => {
+    if (!o.isMesh || !o.userData.key) return;
+    let b = buckets.get(o.userData.key);
+    if (!b) { b = { geo: o.geometry, mat: o.material, mats: [] }; buckets.set(o.userData.key, b); }
+    b.mats.push(o.matrixWorld.clone());
+  });
+}
+function flushBuckets() {
+  const out = new Map();
+  for (const [key, b] of buckets) {
+    const im = new THREE.InstancedMesh(b.geo, b.mat, b.mats.length);
+    b.mats.forEach((m, i) => im.setMatrixAt(i, m));
+    im.frustumCulled = false; scene.add(im); out.set(key, im);
+  }
+  buckets.clear(); return out;
+}
+const rnd = (a, b) => a + Math.random() * (b - a);
+function placeGroup(x, z, scale, yOff = 0) {
+  const g = new THREE.Group();
+  g.position.set(x, heightAt(x, z) + yOff, z); g.rotation.y = Math.random() * TAU; g.scale.setScalar(scale);
+  return g;
+}
+function randomXZ(rmin, rmax) {
+  const a = Math.random() * TAU, r = Math.sqrt(rnd(rmin * rmin, rmax * rmax));
+  return [Math.sin(a) * r, Math.cos(a) * r];
+}
+
+// ---------------- world object prototypes ----------------
+const PROTO = {
+  pine(g) {
+    part(g, 'cyl', 'bark', 0, 1.1, 0, 0.35, 2.2, 0.35);
+    const m = Math.random() < 0.5 ? 'pine' : 'pine2';
+    part(g, 'cone', m, 0, 3.0, 0, 2.3, 3.2, 2.3);
+    part(g, 'cone', m, 0, 4.9, 0, 1.8, 3.0, 1.8);
+    part(g, 'cone', m, 0, 6.6, 0, 1.25, 2.6, 1.25);
+  },
+  roundTree(g) {
+    part(g, 'cyl', 'bark', 0, 1.5, 0, 0.4, 3, 0.4);
+    part(g, 'ico', 'leaf', 0, 4.4, 0, 2.4, 2.2, 2.4);
+    part(g, 'ico', 'leaf', 1.3, 3.6, 0.6, 1.5, 1.3, 1.5);
+    part(g, 'ico', 'leaf', -1.1, 3.9, -0.7, 1.4, 1.2, 1.4);
+  },
+  bush(g, m = 'bush') {
+    part(g, 'ico0', m, 0, 0.5, 0, 1.3, 1.0, 1.3, rnd(0, 1), 0, rnd(0, 1));
+    part(g, 'ico0', m, 0.8, 0.4, 0.3, 0.9, 0.7, 0.9, 0, rnd(0, 1), rnd(0, 1));
+  },
+  rock(g) { part(g, 'dodec', 'rock', 0, 0.25, 0, 1.2, 0.7, 1.0, rnd(0, 0.6), 0, rnd(0, 0.6)); },
+  tuft(g, m = 'grass') {
+    for (let i = 0; i < 4; i++) part(g, 'tuft', m, rnd(-0.3, 0.3), 0.45, rnd(-0.3, 0.3), 0.18, 1.0, 0.18, rnd(-0.4, 0.4), 0, rnd(-0.4, 0.4));
+  },
+  mushroom(g) {
+    part(g, 'cyl', 'mushStem', 0, 0.35, 0, 0.22, 0.7, 0.22);
+    part(g, 'sphere', 'mushCap', 0, 0.7, 0, 0.6, 0.35, 0.6);
+  },
+  palm(g) {
+    part(g, 'palmTrunk', 'bark', 0, 0, 0, 1, 1, 1);
+    const top = new THREE.Object3D(); top.position.set(2.2, 8, 0); g.add(top);
+    for (let i = 0; i < 3; i++) part(top, 'sphere', 'coco', rnd(-0.5, 0.5), -0.4, rnd(-0.5, 0.5), 0.35, 0.35, 0.35);
+    const n = 7;
+    for (let k = 0; k < n; k++) {
+      const spread = new THREE.Object3D(); spread.rotation.y = k * TAU / n + rnd(-0.2, 0.2); top.add(spread);
+      const droop = new THREE.Object3D(); droop.rotation.x = rnd(-0.25, 0.1); spread.add(droop);
+      part(droop, 'frond', 'palmLeaf', 0, 0, 0, rnd(0.9, 1.2), 1, rnd(0.9, 1.15));
+    }
+  },
+  umbrella(g, i) {
+    part(g, 'cyl', 'pole', 0, 1.6, 0, 0.08, 3.2, 0.08);
+    part(g, 'cone', 'umb' + i, 0, 3.4, 0, 2.4, 0.8, 2.4);
+    part(g, 'box', 'towel' + i, 2.4, 0.06, 0.6, 2.4, 0.1, 1.3, 0, rnd(0, 1), 0);
+  },
+  shell(g) { part(g, 'sphere', Math.random() < 0.5 ? 'shell' : 'shell2', 0, 0.12, 0, 0.5, 0.25, 0.4); },
+  starfish(g) {
+    for (let k = 0; k < 5; k++) { const a = k * TAU / 5; part(g, 'box', 'star', Math.sin(a) * 0.3, 0.08, Math.cos(a) * 0.3, 0.22, 0.14, 0.75, 0, a, 0); }
+  },
+  cloud(g) {
+    const n = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) part(g, 'sphere', 'cloud', rnd(-1.2, 1.2) * i, rnd(-0.1, 0.2), rnd(-0.6, 0.6), rnd(0.8, 1.4), rnd(0.4, 0.6), rnd(0.8, 1.2));
+  },
+};
+function scatter(name, count, rmin, rmax, smin, smax, filter, arg) {
+  for (let i = 0; i < count; i++) {
+    const [x, z] = randomXZ(rmin, rmax);
+    if (filter && !filter(x, z, heightAt(x, z))) { i--; continue; }
+    const g = placeGroup(x, z, rnd(smin, smax));
+    PROTO[name](g, arg); collect(g);
+  }
+}
+
+// ---------------- world build ----------------
+function buildWorld() {
+  const W = WORLDS[world];
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(W.sky);
+  scene.fog = new THREE.Fog(W.fog, W.fogNear, W.fogFar);
+  scene.add(new THREE.HemisphereLight(W.hemiSky, W.hemiGround, 1.0));
+  const sun = new THREE.DirectionalLight(0xfff3d6, 1.6); sun.position.set(60, 100, 40); scene.add(sun);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+
+  // terrain
+  const N = 170;
+  const g = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, N, N);
+  g.rotateX(-Math.PI / 2);
+  const pos = g.attributes.position, colors = new Float32Array(pos.count * 3), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i), h = heightAt(x, z);
+    pos.setY(i, h); groundColor(x, z, h, c);
+    colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  g.computeVertexNormals();
+  scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ map: groundTex, vertexColors: true })));
+
+  waterMesh = null;
+  if (world === 'beach') {
+    const wg = new THREE.PlaneGeometry(900, 900); wg.rotateX(-Math.PI / 2);
+    waterMesh = new THREE.Mesh(wg, new THREE.MeshPhongMaterial({
+      color: 0x2aa0d8, map: waterTex, transparent: true, opacity: 0.8, shininess: 90, specular: 0x9fd8ff }));
+    waterMesh.position.y = 0; scene.add(waterMesh);
+  }
+
+  // objects
+  if (world === 'forest') {
+    scatter('pine', 110, 8, R + 5, 0.9, 1.6);
+    scatter('pine', 90, R + 5, R + 45, 0.8, 1.3);
+    scatter('roundTree', 50, 8, R, 0.9, 1.4);
+    scatter('bush', 120, 0, R + 10, 0.8, 1.6);
+    scatter('rock', 45, 0, R + 30, 0.6, 2.0);
+    scatter('tuft', 260, 0, R + 5, 0.9, 1.5);
+    scatter('mushroom', 45, 0, R, 0.8, 1.4);
+  } else {
+    const dry = (x, z, h) => h > 1.1;
+    scatter('palm', 48, 10, R * 0.95, 0.9, 1.4, dry);
+    scatter('bush', 50, 0, R * 0.9, 0.8, 1.5, dry, 'bushBeach');
+    scatter('tuft', 170, 0, R, 0.9, 1.6, dry, 'grassBeach');
+    scatter('rock', 35, R * 0.8, R + 12, 0.6, 1.8, (x, z, h) => h > -0.3);
+    scatter('shell', 70, 0, R + 4, 0.8, 1.6, (x, z, h) => h > 0.2);
+    scatter('starfish', 16, R * 0.6, R + 4, 0.8, 1.3, (x, z, h) => h > 0.2);
+    for (let i = 0; i < 6; i++) {
+      const [x, z] = randomXZ(20, R * 0.85);
+      const gg = placeGroup(x, z, 1); PROTO.umbrella(gg, i % 3); collect(gg);
+    }
+  }
+  for (let i = 0; i < 16; i++) {
+    const [x, z] = randomXZ(20, 240);
+    const gg = new THREE.Group(); gg.position.set(x, rnd(55, 80), z); gg.rotation.y = Math.random() * TAU; gg.scale.setScalar(rnd(4, 9));
+    PROTO.cloud(gg); collect(gg);
+  }
+  cloudMesh = flushBuckets().get('sphere|cloud') || null;
+}
+
+// ---------------- food ----------------
+const FOOD_TYPES = ['apple', 'banana', 'popsicle'];
+const FG = {
+  sphere: new THREE.SphereGeometry(0.75, 12, 10), stem: new THREE.CylinderGeometry(0.06, 0.08, 0.5, 6),
+  leaf: new THREE.PlaneGeometry(0.6, 0.35), banana: new THREE.TorusGeometry(0.9, 0.27, 8, 16, Math.PI * 0.85),
+  pop: new THREE.BoxGeometry(0.95, 1.5, 0.5), popTop: new THREE.CylinderGeometry(0.475, 0.475, 0.5, 12, 1, false, 0, Math.PI),
+  stick: new THREE.CylinderGeometry(0.09, 0.09, 1.0, 6),
+};
+const FM = {
+  apple: lam(0xe5322d), stem: lam(0x6b4a2b), leaf: lam(0x3fa34d, { side: THREE.DoubleSide }),
+  banana: lam(0xffd93b), pops: [lam(0xff6fb5), lam(0x6fd3ff), lam(0xb57bff)], stick: lam(0xe8d8b0),
+};
+function makeFoodMesh(type) {
+  const g = new THREE.Group();
+  if (type === 'apple') {
+    g.add(new THREE.Mesh(FG.sphere, FM.apple));
+    const s = new THREE.Mesh(FG.stem, FM.stem); s.position.y = 0.85; g.add(s);
+    const l = new THREE.Mesh(FG.leaf, FM.leaf); l.position.set(0.25, 0.9, 0); l.rotation.set(-0.6, 0.3, 0.4); g.add(l);
+  } else if (type === 'banana') {
+    const b = new THREE.Mesh(FG.banana, FM.banana); b.rotation.set(Math.PI / 2, 0, 0.4); b.position.y = 0.1; g.add(b);
+  } else {
+    const m = FM.pops[Math.floor(Math.random() * 3)];
+    const b = new THREE.Mesh(FG.pop, m); b.position.y = 0.3; g.add(b);
+    const t = new THREE.Mesh(FG.popTop, m); t.rotation.set(Math.PI / 2, 0, 0); t.position.y = 1.05; g.add(t);
+    const s = new THREE.Mesh(FG.stick, FM.stick); s.position.y = -0.9; g.add(s);
+  }
+  return g;
+}
+function spawnFood(x, z, type) {
+  if (x === undefined) {
+    for (let i = 0; i < 30; i++) {
+      [x, z] = randomXZ(5, R * 0.95);
+      if (world !== 'beach' || heightAt(x, z) > 0.8) break;
+    }
+  }
+  type = type || FOOD_TYPES[Math.floor(Math.random() * FOOD_TYPES.length)];
+  const g = makeFoodMesh(type);
+  const baseY = heightAt(x, z) + 1.0;
+  g.position.set(x, baseY, z);
+  scene.add(g);
+  foods.push({ x, z, g, baseY, phase: Math.random() * TAU });
+}
+function updateFoods(dt) {
+  for (const f of foods) {
+    f.g.position.y = f.baseY + Math.sin(time * 2.2 + f.phase) * 0.22;
+    f.g.rotation.y += dt * 1.2;
+  }
+}
+
+// ---------------- snakes ----------------
+const segGeo = new THREE.SphereGeometry(1, 12, 10);
+function buildHead(color) {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(HEAD_R, 16, 14), lam(color)));
+  const eyeG = new THREE.SphereGeometry(0.32, 10, 8), pupG = new THREE.SphereGeometry(0.16, 8, 6);
+  const white = lam(0xffffff), black = lam(0x111111);
+  for (const sx of [-0.5, 0.5]) {
+    const e = new THREE.Mesh(eyeG, white); e.position.set(sx, 0.45, 0.85); g.add(e);
+    const p = new THREE.Mesh(pupG, black); p.position.set(sx, 0.5, 1.1); g.add(p);
+  }
+  const tongue = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.9), lam(0xff3355));
+  tongue.position.set(0, -0.2, 1.5); g.add(tongue);
+  return g;
+}
+const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+class Snake {
+  constructor(isPlayer, color) {
+    this.isPlayer = isPlayer;
+    this.color = new THREE.Color(color);
+    this.speed = isPlayer ? PLAYER_SPEED : CPU_SPEED;
+    this.aggro = isPlayer ? 0 : rnd(0.3, 1.0);
+    this.turn = 0; this.boost = false;
+    this.seg = new Float32Array(MAX_SEG * 3);
+    this.alive = false; this.respawnT = 0; this.len = START_LEN;
+    this.body = new THREE.InstancedMesh(segGeo, lam(0xffffff), MAX_SEG);
+    this.body.frustumCulled = false;
+    const c2 = this.color.clone().multiplyScalar(0.7);
+    for (let i = 0; i < MAX_SEG; i++) this.body.setColorAt(i, (i % 4 < 2) ? this.color : c2);
+    this.body.instanceColor.needsUpdate = true;
+    this.body.count = 0;
+    this.head = buildHead(this.color); this.head.visible = false;
+    scene.add(this.body, this.head);
+    this.wobble = Math.random() * 100; this.thinkT = 0; this.target = null;
+    this.x = 0; this.z = 0; this.heading = 0; this.trail = []; this.trailLen = 0;
+  }
+  spawn(x, z, heading) {
+    this.x = x; this.z = z; this.heading = heading; this.len = START_LEN; this.alive = true;
+    this.trail = []; this.trailLen = 0;
+    const n = START_LEN + 3;
+    for (let i = 0; i <= n; i++) this.trail.push({ x: x - Math.sin(heading) * i * SEG_SPACING, z: z - Math.cos(heading) * i * SEG_SPACING });
+    this.trailLen = n * SEG_SPACING;
+    this.head.visible = true; this.target = null; this.thinkT = 0;
+    this.placeSegments(); this.placeHead();
+  }
+  die() {
+    this.alive = false; this.head.visible = false; this.body.count = 0;
+  }
+  think(dt) {
+    this.thinkT -= dt;
+    if (this.thinkT <= 0) {
+      this.thinkT = rnd(0.25, 0.55);
+      let best = null, bestD = 1e9;
+      for (const f of foods) { const d = Math.hypot(f.x - this.x, f.z - this.z); if (d < bestD) { bestD = d; best = { x: f.x, z: f.z }; } }
+      if (Math.random() < this.aggro) {
+        for (const o of snakes) {
+          if (o === this || !o.alive) continue;
+          for (let k = 2; k < o.len; k += 3) {
+            const sx = o.seg[k * 3], sz = o.seg[k * 3 + 1];
+            const d = Math.hypot(sx - this.x, sz - this.z) * 0.85;
+            if (d < bestD && d < 45) { bestD = d; best = { x: sx, z: sz }; }
+          }
+        }
+      }
+      if (!best || bestD > 80) {
+        if (!this.target || this.target.wander !== true || Math.hypot(this.target.x - this.x, this.target.z - this.z) < 8) {
+          const [x, z] = randomXZ(0, R * 0.75); best = { x, z, wander: true };
+        } else best = this.target;
+      }
+      if (Math.hypot(this.x, this.z) > R * 0.88) { const [x, z] = randomXZ(0, R * 0.4); best = { x, z, wander: true }; }
+      this.target = best;
+    }
+    if (this.target) {
+      const desired = Math.atan2(this.target.x - this.x, this.target.z - this.z);
+      const diff = wrapAngle(desired - this.heading) + Math.sin(time * 1.3 + this.wobble) * 0.25;
+      this.turn = clamp(diff * 2.5, -1, 1);
+    }
+  }
+  update(dt) {
+    const sp = this.speed * (this.boost ? 1.65 : 1);
+    this.heading += this.turn * TURN_RATE * dt;
+    let nx = this.x + Math.sin(this.heading) * sp * dt, nz = this.z + Math.cos(this.heading) * sp * dt;
+    const r = Math.hypot(nx, nz);
+    if (r > R) { nx *= R / r; nz *= R / r; }
+    const d = Math.hypot(nx - this.x, nz - this.z);
+    this.x = nx; this.z = nz;
+    if (d > 0) { this.trail.unshift({ x: nx, z: nz }); this.trailLen += d; }
+    const need = (this.len + 1) * SEG_SPACING + 2;
+    while (this.trailLen > need && this.trail.length > 2) {
+      const a = this.trail[this.trail.length - 1], b = this.trail[this.trail.length - 2];
+      this.trailLen -= Math.hypot(a.x - b.x, a.z - b.z); this.trail.pop();
+    }
+    this.placeSegments(); this.placeHead();
+  }
+  placeHead() {
+    this.head.position.set(this.x, heightAt(this.x, this.z) + HEAD_R * 0.95, this.z);
+    this.head.rotation.set(0, this.heading, this.turn * 0.25);
+  }
+  placeSegments() {
+    const t = this.trail, m = tmpM;
+    let idx = 0, acc = 0;
+    for (let k = 1; k <= this.len; k++) {
+      const target = k * SEG_SPACING;
+      while (idx < t.length - 1) {
+        const a = t[idx], b = t[idx + 1], sd = Math.hypot(b.x - a.x, b.z - a.z);
+        if (acc + sd >= target) break;
+        acc += sd; idx++;
+      }
+      let px, pz;
+      if (idx >= t.length - 1) { px = t[t.length - 1].x; pz = t[t.length - 1].z; }
+      else {
+        const a = t[idx], b = t[idx + 1], sd = Math.hypot(b.x - a.x, b.z - a.z);
+        const f = sd > 0 ? (target - acc) / sd : 0;
+        px = a.x + (b.x - a.x) * f; pz = a.z + (b.z - a.z) * f;
+      }
+      const s = SEG_R * (0.5 + 0.5 * (1 - (k - 1) / Math.max(this.len, 8)));
+      m.makeScale(s, s, s); m.setPosition(px, heightAt(px, pz) + s * 0.92, pz);
+      this.body.setMatrixAt(k - 1, m);
+      this.seg[(k - 1) * 3] = px; this.seg[(k - 1) * 3 + 1] = pz; this.seg[(k - 1) * 3 + 2] = s;
+    }
+    this.body.count = this.len; this.body.instanceMatrix.needsUpdate = true;
+  }
+}
+const tmpM = new THREE.Matrix4();
+
+function randomSpawn() {
+  for (let i = 0; i < 30; i++) {
+    const [x, z] = randomXZ(10, R * 0.8);
+    if (!player || !player.alive || Math.hypot(x - player.x, z - player.z) > 35) return [x, z];
+  }
+  return randomXZ(10, R * 0.8);
+}
+function kill(victim, killer) {
+  victim.die();
+  const n = Math.min(victim.len, 60);
+  for (let k = 0; k < n; k += 2) spawnFood(victim.seg[k * 3], victim.seg[k * 3 + 1]);
+  killer.len = Math.min(MAX_SEG, killer.len + 3);
+  if (killer.isPlayer) score += 5;
+  if (victim.isPlayer) gameOver(); else victim.respawnT = 4;
+}
+function eatFood(s, i) {
+  const f = foods[i]; scene.remove(f.g); foods.splice(i, 1);
+  s.len = Math.min(MAX_SEG, s.len + 1);
+  if (s.isPlayer) score += 1;
+  if (foods.length < FOOD_COUNT) spawnFood();
+}
+function resolveCollisions() {
+  for (const a of snakes) {
+    if (!a.alive) continue;
+    for (let i = foods.length - 1; i >= 0; i--) {
+      const f = foods[i];
+      if (Math.hypot(f.x - a.x, f.z - a.z) < HEAD_R + 1.3) eatFood(a, i);
+    }
+    for (const b of snakes) {
+      if (b === a || !b.alive || !a.alive) continue;
+      if (Math.hypot(b.x - a.x, b.z - a.z) < HEAD_R * 1.8) {
+        const loser = a.len >= b.len ? b : a; kill(loser, loser === a ? b : a); continue;
+      }
+      const sg = b.seg;
+      for (let k = 0; k < b.len; k++) {
+        const dx = sg[k * 3] - a.x, dz = sg[k * 3 + 1] - a.z, rr = (HEAD_R + sg[k * 3 + 2]) * 0.85;
+        if (dx * dx + dz * dz < rr * rr) { kill(b, a); break; }
+      }
+    }
+  }
+}
+
+// ---------------- input ----------------
+const canvas = document.getElementById('c');
+const pointers = new Map(), keys = new Set();
+canvas.addEventListener('pointerdown', e => { pointers.set(e.pointerId, e.clientX < innerWidth / 2 ? -1 : 1); });
+const release = e => pointers.delete(e.pointerId);
+window.addEventListener('pointerup', release); window.addEventListener('pointercancel', release);
+window.addEventListener('blur', () => pointers.clear());
+window.addEventListener('keydown', e => keys.add(e.key)); window.addEventListener('keyup', e => keys.delete(e.key));
+function readInput(s) {
+  let l = false, r = false;
+  for (const v of pointers.values()) { if (v < 0) l = true; else r = true; }
+  if (keys.has('ArrowLeft') || keys.has('a')) l = true;
+  if (keys.has('ArrowRight') || keys.has('d')) r = true;
+  s.boost = (l && r) || keys.has(' ') || keys.has('Shift') || keys.has('ArrowUp');
+  s.turn = (l && r) ? 0 : (l ? 1 : 0) - (r ? 1 : 0);
+}
+
+// ---------------- camera ----------------
+const camLook = new THREE.Vector3(), camPos = new THREE.Vector3();
+function updateCamera(dt, snap) {
+  if (!player) return;
+  const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
+  const hy = heightAt(player.x, player.z);
+  camPos.set(player.x - fx * 11, hy + 6.5, player.z - fz * 11);
+  camPos.y = Math.max(camPos.y, heightAt(camPos.x, camPos.z) + 2.5);
+  camLook.set(player.x + fx * 6, hy + 1, player.z + fz * 6);
+  if (snap) { camera.position.copy(camPos); camLookS.copy(camLook); }
+  else { const k = 1 - Math.exp(-dt * 4); camera.position.lerp(camPos, k); camLookS.lerp(camLook, k); }
+  camera.lookAt(camLookS);
+}
+const camLookS = new THREE.Vector3();
+
+// ---------------- game flow ----------------
+function disposeScene() {
+  if (!scene) return;
+  scene.traverse(o => { if (o.isMesh) { o.geometry.dispose(); if (o.material.dispose) o.material.dispose(); } });
+  scene = null;
+}
+function startGame() {
+  disposeScene();
+  seed = Math.random() * 1000;
+  foods = []; snakes = []; score = 0; time = 0;
+  buildWorld();
+  player = new Snake(true, 0x3fb950);
+  player.spawn(0, 0, Math.random() * TAU);
+  for (let i = 0; i < cpuCount; i++) {
+    const s = new Snake(false, CPU_COLORS[i % CPU_COLORS.length]);
+    const [x, z] = randomSpawn(); s.spawn(x, z, Math.random() * TAU); snakes.push(s);
+  }
+  snakes.unshift(player);
+  for (let i = 0; i < FOOD_COUNT; i++) spawnFood();
+  updateCamera(0, true);
+  state = 'playing';
+  menu.classList.add('hidden'); over.classList.add('hidden'); hud.classList.remove('hidden');
+}
+function gameOver() {
+  state = 'over';
+  document.getElementById('finalScore').textContent = `Score ${score} · Length ${player.len}`;
+  over.classList.remove('hidden');
+}
+function step(dt) {
+  for (const s of snakes) {
+    if (!s.alive) {
+      if (!s.isPlayer) { s.respawnT -= dt; if (s.respawnT <= 0) { const [x, z] = randomSpawn(); s.spawn(x, z, Math.random() * TAU); } }
+      continue;
+    }
+    if (s.isPlayer) readInput(s); else s.think(dt);
+    s.update(dt);
+  }
+  resolveCollisions();
+  updateFoods(dt);
+  updateCamera(dt, false);
+  if (cloudMesh) cloudMesh.rotation.y += dt * 0.004;
+  if (waterMesh) { waterMesh.material.map.offset.x += dt * 0.012; waterMesh.material.map.offset.y += dt * 0.007; }
+  scoreEl.textContent = score; lenEl.textContent = player.len;
+  aliveEl.textContent = snakes.filter(s => s.alive && !s.isPlayer).length;
+}
+
+// ---------------- UI wiring ----------------
+const menu = document.getElementById('menu'), over = document.getElementById('over'), hud = document.getElementById('hud');
+const scoreEl = document.getElementById('score'), lenEl = document.getElementById('len'), aliveEl = document.getElementById('alive');
+document.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => {
+  document.querySelectorAll('.card').forEach(x => x.classList.remove('sel')); c.classList.add('sel'); world = c.dataset.world;
+}));
+const cpuIn = document.getElementById('cpu');
+cpuIn.addEventListener('input', () => { cpuCount = +cpuIn.value; document.getElementById('cpuVal').textContent = cpuIn.value; });
+document.getElementById('play').addEventListener('click', startGame);
+document.getElementById('again').addEventListener('click', startGame);
+document.getElementById('toMenu').addEventListener('click', () => { over.classList.add('hidden'); hud.classList.add('hidden'); menu.classList.remove('hidden'); state = 'menu'; });
+
+// ---------------- renderer / loop ----------------
+renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.5, 600);
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+clock = new THREE.Clock();
+
+// menu backdrop: an idle world with a slowly orbiting camera
+buildWorld();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05); time += dt;
+  if (state === 'menu') {
+    const a = time * 0.08;
+    camera.position.set(Math.sin(a) * 60, 22, Math.cos(a) * 60); camera.lookAt(0, 4, 0);
+    if (cloudMesh) cloudMesh.rotation.y += dt * 0.004;
+  } else step(dt);
+  renderer.render(scene, camera);
+}
+animate();
+
+// ?play=forest|beach&cpu=N starts a game immediately (handy for testing)
+{
+  const q = new URLSearchParams(location.search);
+  if (q.get('play')) {
+    if (WORLDS[q.get('play')]) world = q.get('play');
+    if (q.get('cpu') !== null) cpuCount = clamp(+q.get('cpu') || 0, 0, 10);
+    startGame();
+  }
+}
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(() => {});
+</script>
+</body>
+</html>
