@@ -20,8 +20,8 @@
     color:#fff;text-align:center;padding:24px;padding-top:max(24px,env(safe-area-inset-top))}
   .hidden{display:none !important}
   h1{font-size:clamp(34px,7vw,68px);margin:0;text-shadow:0 4px 18px rgba(0,0,0,.4)}
-  .cards{display:flex;gap:16px}
-  .card{width:150px;padding:18px 10px;border-radius:22px;background:rgba(255,255,255,.14);
+  .cards{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+  .card{width:128px;padding:18px 10px;border-radius:22px;background:rgba(255,255,255,.14);
     border:3px solid transparent;font-size:20px;font-weight:700;cursor:pointer}
   .card .emoji{font-size:56px;display:block}
   .card.sel{border-color:#ffd34a;background:rgba(255,255,255,.28)}
@@ -53,6 +53,7 @@
   <div class="cards">
     <div class="card sel" data-world="forest"><span class="emoji">🌲</span>Forest</div>
     <div class="card" data-world="beach"><span class="emoji">🏖️</span>Beach</div>
+    <div class="card" data-world="space"><span class="emoji">🚀</span>Space</div>
   </div>
   <div class="row"><label for="cpu">Other snakes</label><input id="cpu" type="range" min="0" max="10" value="4"><b id="cpuVal">4</b></div>
   <div class="row"><label><input id="musicOn" type="checkbox" checked> Music</label></div>
@@ -80,6 +81,7 @@ const PLAYER_SPEED = 14, CPU_SPEED = 11.5, TURN_RATE = 2.6;
 const WORLDS = {
   forest: { sky: 0x9fd3ff, fog: 0xb4dcf5, fogNear: 70, fogFar: 240, hemiSky: 0xcfe8ff, hemiGround: 0x3f6b2a },
   beach:  { sky: 0x7ec8ff, fog: 0xd2ebff, fogNear: 90, fogFar: 270, hemiSky: 0xdff2ff, hemiGround: 0xc9b57a },
+  space:  { sky: 0x05030f, fog: 0x0b0718, fogNear: 60, fogFar: 210, hemiSky: 0x5a4fa0, hemiGround: 0x1a1424 },
 };
 const CPU_COLORS = [0xff8c42, 0x9b5de5, 0x3a86ff, 0xff5d8f, 0x2ec4b6, 0xffd166, 0xef476f, 0x8d6e63, 0x06d6a0, 0xf4a261];
 
@@ -88,7 +90,7 @@ let world = 'forest', cpuCount = 4, seed = 0;
 let scene, camera, renderer, clock;
 let snakes = [], foods = [], player = null;
 let state = 'menu', score = 0, time = 0;
-let waterMesh = null, cloudMesh = null, pools = [];
+let waterMesh = null, cloudMesh = null, pools = [], craters = [], ufos = [];
 
 // ---------------- noise / terrain ----------------
 function hash(ix, iz) {
@@ -117,6 +119,18 @@ function heightAt(x, z) {
     if (r > R) { const t = (r - R) / 40; h += t * t * 45; }
     return h;
   }
+  if (world === 'space') {
+    let h = fbm(x * 0.03 + seed, z * 0.03 + seed) * 5;
+    for (const c of craters) {
+      const d = Math.hypot(x - c.x, z - c.z) / c.r;
+      if (d < 1.25) {
+        if (d < 1) h -= (1 - d * d) * c.depth;
+        const rim = 1 - Math.abs(d - 1) / 0.25; if (rim > 0) h += rim * c.depth * 0.35;
+      }
+    }
+    if (r > R) { const t = (r - R) / 35; h += t * t * 40; }
+    return h;
+  }
   let h = 2.2 + fbm(x * 0.02 + seed, z * 0.02 + seed) * 3;
   const r0 = R * 0.92;
   if (r > r0) { const t = (r - r0) / 18; h -= Math.pow(t, 1.4) * 7; }
@@ -129,6 +143,10 @@ function groundColor(x, z, h, c) {
     c.setRGB(0.32, 0.58, 0.19).lerp(tmpC.setRGB(0.17, 0.40, 0.12), n);
     if (h > 10) c.lerp(tmpC.setRGB(0.45, 0.42, 0.38), Math.min(1, (h - 10) / 14));
     if (h > 26) c.lerp(tmpC.setRGB(0.95, 0.96, 1.0), Math.min(1, (h - 26) / 8));
+  } else if (world === 'space') {
+    c.setRGB(0.60, 0.57, 0.68).lerp(tmpC.setRGB(0.38, 0.34, 0.48), n);
+    if (h < -1) c.lerp(tmpC.setRGB(0.20, 0.17, 0.28), Math.min(1, (-1 - h) / 5));
+    if (h > 14) c.lerp(tmpC.setRGB(0.30, 0.27, 0.38), Math.min(1, (h - 14) / 20));
   } else {
     c.setRGB(0.96, 0.88, 0.65).lerp(tmpC.setRGB(0.88, 0.78, 0.55), n);
     if (h < 1.0) c.lerp(tmpC.setRGB(0.72, 0.64, 0.45), Math.min(1, (1.0 - h) / 1.5));
@@ -190,7 +208,7 @@ const GEO = {
   ico: new THREE.IcosahedronGeometry(1, 1), ico0: new THREE.IcosahedronGeometry(1, 0),
   dodec: new THREE.DodecahedronGeometry(1, 0), sphere: new THREE.SphereGeometry(1, 10, 8),
   box: new THREE.BoxGeometry(1, 1, 1), tuft: new THREE.ConeGeometry(1, 1, 4),
-  frond: frondGeo, palmTrunk: palmTrunkGeo,
+  frond: frondGeo, palmTrunk: palmTrunkGeo, octa: new THREE.OctahedronGeometry(1, 0),
 };
 const lam = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 const MAT = {
@@ -201,6 +219,13 @@ const MAT = {
   coco: lam(0x6b4a2b), pole: lam(0xf2f2f2), shell: lam(0xf7dcd0), shell2: lam(0xf5c6a5), star: lam(0xff8a5b),
   cloud: lam(0xffffff), umb0: lam(0xff5a5a), umb1: lam(0x4a90ff), umb2: lam(0xffd34a),
   towel0: lam(0x4ad4ff), towel1: lam(0xff9ad5), towel2: lam(0xc6ff7a),
+  moonRock: lam(0x6e6880, { flatShading: true }),
+  crystalA: lam(0x7df9ff, { emissive: 0x1fb8c8, flatShading: true }), crystalB: lam(0xff7bf2, { emissive: 0xb0309f, flatShading: true }),
+  stalk: lam(0x8fd0ff), bulb: lam(0xa8ff6a, { emissive: 0x5fd622 }),
+  ufo: lam(0xb8bcc8, { flatShading: true }), dome: lam(0x9fd8ff, { emissive: 0x2a6fb0, transparent: true, opacity: 0.75 }),
+  ufoLight: lam(0xffd34a, { emissive: 0xffaa00 }), rocketBody: lam(0xf0f0f0), rocketNose: lam(0xff4d4d), flagPole: lam(0xdddddd), flag: lam(0x3a86ff),
+  helmet: new THREE.MeshPhongMaterial({ color: 0xa8dcff, transparent: true, opacity: 0.3, shininess: 140, specular: 0xffffff, depthWrite: false }),
+  suit: lam(0xf4f4f8), pack: lam(0xc9ccd6),
 };
 
 // ---------------- instancing collector ----------------
@@ -286,6 +311,25 @@ const PROTO = {
   starfish(g) {
     for (let k = 0; k < 5; k++) { const a = k * TAU / 5; part(g, 'box', 'star', Math.sin(a) * 0.3, 0.08, Math.cos(a) * 0.3, 0.22, 0.14, 0.75, 0, a, 0); }
   },
+  crystal(g) {
+    const m = Math.random() < 0.5 ? 'crystalA' : 'crystalB';
+    for (let i = 0; i < 3; i++) { const sy = rnd(1.3, 2.6); part(g, 'octa', m, rnd(-0.7, 0.7), sy * 0.7, rnd(-0.7, 0.7), 0.45, sy, 0.45, rnd(-0.3, 0.3), rnd(0, TAU), rnd(-0.3, 0.3)); }
+  },
+  moonRock(g) { part(g, 'dodec', 'moonRock', 0, 0.25, 0, 1.2, 0.7, 1.0, rnd(0, 0.6), 0, rnd(0, 0.6)); },
+  alienPlant(g) {
+    part(g, 'cyl', 'stalk', 0, 1.2, 0, 0.12, 2.4, 0.12, rnd(-0.2, 0.2), 0, rnd(-0.2, 0.2));
+    part(g, 'sphere', 'bulb', 0, 2.6, 0, 0.55, 0.55, 0.55);
+  },
+  rocket(g) {
+    g.rotation.z = rnd(0.25, 0.45);
+    part(g, 'cyl', 'rocketBody', 0, 2.5, 0, 0.9, 5, 0.9);
+    part(g, 'cone', 'rocketNose', 0, 5.8, 0, 0.9, 1.8, 0.9);
+    for (let k = 0; k < 3; k++) { const a = k * TAU / 3; part(g, 'box', 'rocketNose', Math.sin(a) * 0.9, 0.7, Math.cos(a) * 0.9, 0.15, 1.4, 0.9, 0, a, 0); }
+  },
+  flag(g) {
+    part(g, 'cyl', 'flagPole', 0, 1.5, 0, 0.05, 3, 0.05);
+    part(g, 'box', 'flag', 0.6, 2.6, 0, 1.2, 0.7, 0.05);
+  },
   cloud(g) {
     const n = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) part(g, 'sphere', 'cloud', rnd(-1.2, 1.2) * i, rnd(-0.1, 0.2), rnd(-0.6, 0.6), rnd(0.8, 1.4), rnd(0.4, 0.6), rnd(0.8, 1.2));
@@ -333,14 +377,54 @@ function buildPools() {
 }
 
 // ---------------- world build ----------------
+function makeUfo() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(GEO.cyl, MAT.ufo); body.scale.set(2.6, 0.45, 2.6); g.add(body);
+  const dome = new THREE.Mesh(GEO.sphere, MAT.dome); dome.scale.setScalar(0.95); dome.position.y = 0.5; g.add(dome);
+  for (let k = 0; k < 6; k++) {
+    const a = k * TAU / 6, l = new THREE.Mesh(GEO.sphere, MAT.ufoLight);
+    l.scale.setScalar(0.22); l.position.set(Math.sin(a) * 2.2, -0.15, Math.cos(a) * 2.2); g.add(l);
+  }
+  return g;
+}
+function animateUfos(dt) {
+  for (const u of ufos) {
+    const d = u.userData, a = time * 0.25 + d.phase;
+    u.position.set(d.cx + Math.cos(a) * 9, d.baseY + Math.sin(time * 1.6 + d.phase) * 0.8, d.cz + Math.sin(a) * 9);
+    u.rotation.y += dt * 1.4; u.rotation.z = Math.sin(time * 0.9 + d.phase) * 0.12;
+  }
+}
 function buildWorld() {
   const W = WORLDS[world];
+  const space = world === 'space';
+  craters = []; ufos = [];
+  if (space) for (let i = 0; i < 7; i++) { const [x, z] = randomXZ(0, R + 20); craters.push({ x, z, r: rnd(8, 18), depth: rnd(2.5, 5.5) }); }
   scene = new THREE.Scene();
   scene.background = new THREE.Color(W.sky);
   scene.fog = new THREE.Fog(W.fog, W.fogNear, W.fogFar);
-  scene.add(new THREE.HemisphereLight(W.hemiSky, W.hemiGround, 1.0));
-  const sun = new THREE.DirectionalLight(0xfff3d6, 1.6); sun.position.set(60, 100, 40); scene.add(sun);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+  scene.add(new THREE.HemisphereLight(W.hemiSky, W.hemiGround, space ? 0.7 : 1.0));
+  const sun = new THREE.DirectionalLight(space ? 0xdfe8ff : 0xfff3d6, space ? 1.5 : 1.6); sun.position.set(60, 100, 40); scene.add(sun);
+  scene.add(new THREE.AmbientLight(0xffffff, space ? 0.12 : 0.25));
+  if (space) {
+    const n = 1600, pts = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const u = Math.random() * TAU, v = Math.acos(rnd(0.02, 1)), rr = 480;
+      pts[i * 3] = Math.sin(v) * Math.cos(u) * rr; pts[i * 3 + 1] = Math.cos(v) * rr; pts[i * 3 + 2] = Math.sin(v) * Math.sin(u) * rr;
+    }
+    const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+    scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, fog: false })));
+    const planet = new THREE.Mesh(new THREE.SphereGeometry(55, 32, 24), new THREE.MeshLambertMaterial({ color: 0xf0a060, fog: false }));
+    planet.position.set(-220, 130, -300); scene.add(planet);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(70, 110, 64), new THREE.MeshBasicMaterial({ color: 0xd8c8a8, side: THREE.DoubleSide, transparent: true, opacity: 0.55, fog: false }));
+    ring.position.copy(planet.position); ring.rotation.set(1.25, 0.3, 0.2); scene.add(ring);
+    const moon = new THREE.Mesh(new THREE.SphereGeometry(14, 20, 16), new THREE.MeshLambertMaterial({ color: 0xc8c8d8, fog: false }));
+    moon.position.set(260, 170, -120); scene.add(moon);
+    for (let i = 0; i < 3; i++) {
+      const [x, z] = randomXZ(15, R * 0.8), u = makeUfo();
+      u.userData = { cx: x, cz: z, phase: Math.random() * TAU, baseY: heightAt(x, z) + rnd(7, 10) };
+      scene.add(u); ufos.push(u);
+    }
+  }
 
   // terrain
   const N = 170;
@@ -375,7 +459,7 @@ function buildWorld() {
     scatter('rock', 45, 0, R + 30, 0.6, 2.0);
     scatter('tuft', 260, 0, R + 5, 0.9, 1.5);
     scatter('mushroom', 45, 0, R, 0.8, 1.4);
-  } else {
+  } else if (world === 'beach') {
     const dry = (x, z, h) => h > 1.1;
     scatter('palm', 30, 10, R * 0.95, 0.9, 1.4, dry);
     scatter('bush', 50, 0, R * 0.9, 0.8, 1.5, dry, 'bushBeach');
@@ -387,8 +471,14 @@ function buildWorld() {
       const [x, z] = randomXZ(20, R * 0.85);
       const gg = placeGroup(x, z, 1); PROTO.umbrella(gg, i % 3); collect(gg);
     }
+  } else {
+    scatter('crystal', 70, 0, R + 15, 0.8, 1.7);
+    scatter('moonRock', 110, 0, R + 35, 0.6, 2.2);
+    scatter('alienPlant', 90, 0, R, 0.8, 1.5);
+    scatter('rocket', 2, 25, R * 0.8, 0.9, 1.2);
+    scatter('flag', 3, 15, R * 0.8, 1, 1);
   }
-  for (let i = 0; i < 16; i++) {
+  if (!space) for (let i = 0; i < 16; i++) {
     const [x, z] = randomXZ(20, 240);
     const gg = new THREE.Group(); gg.position.set(x, rnd(55, 80), z); gg.rotation.y = Math.random() * TAU; gg.scale.setScalar(rnd(4, 9));
     PROTO.cloud(gg); collect(gg);
@@ -502,10 +592,17 @@ class Snake {
     this.uniHead = buildHead(0xffffff); addUnicornBits(this.uniHead); this.uniHead.visible = false;
     this.uniHeadMat = this.uniHead.children[0].material;
     this.uniT = 0;
+    // space suit: glass helmet, collar ring and a little backpack, shown in the space world
+    this.helmet = new THREE.Group();
+    const glass = new THREE.Mesh(new THREE.SphereGeometry(HEAD_R * 1.3, 18, 14), MAT.helmet); glass.renderOrder = 2; this.helmet.add(glass);
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(HEAD_R * 1.05, 0.22, 8, 20), MAT.suit); collar.rotation.x = Math.PI / 2; collar.position.y = -HEAD_R * 0.75; this.helmet.add(collar);
+    const pack = new THREE.Mesh(GEO.box, MAT.pack); pack.scale.set(1.3, 1.1, 0.6); pack.position.set(0, -0.5, -1.6); this.helmet.add(pack);
+    for (const sx of [-0.35, 0.35]) { const tank = new THREE.Mesh(GEO.cyl, MAT.suit); tank.scale.set(0.28, 1.0, 0.28); tank.position.set(sx, -0.45, -1.95); this.helmet.add(tank); }
+    this.helmet.visible = false;
     this.fire = new THREE.Group(); this.fire.visible = false;
     for (let i = 0; i < 14; i++) this.fire.add(new THREE.Mesh(fireGeo, fireMats[i % 3]));
     this.burnT = 0; this.shrinkT = 0;
-    scene.add(this.body, this.head, this.uniHead, this.fire);
+    scene.add(this.body, this.head, this.uniHead, this.fire, this.helmet);
     this.wobble = Math.random() * 100; this.thinkT = 0; this.target = null;
     this.x = 0; this.z = 0; this.heading = 0; this.trail = []; this.trailLen = 0;
   }
@@ -520,7 +617,7 @@ class Snake {
     this.placeSegments(); this.placeHead();
   }
   die() {
-    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.body.count = 0; this.setBurning(false); this.uniT = 0;
+    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.body.count = 0; this.setBurning(false); this.uniT = 0;
   }
   setUnicorn(on) {
     this.uniT = on ? UNICORN_TIME : 0;
@@ -528,8 +625,8 @@ class Snake {
     if (!on) this.restoreStripes();
   }
   restoreStripes() {
-    const c2 = this.color.clone().multiplyScalar(0.7);
-    for (let i = 0; i < MAX_SEG; i++) this.body.setColorAt(i, (i % 4 < 2) ? this.color : c2);
+    const c2 = this.color.clone().multiplyScalar(0.7), suit = new THREE.Color(0xf4f4f8);
+    for (let i = 0; i < MAX_SEG; i++) this.body.setColorAt(i, world === 'space' ? (i % 4 === 3 ? this.color : suit) : (i % 4 < 2) ? this.color : c2);
     this.body.instanceColor.needsUpdate = true;
   }
   updateUnicorn(dt) {
@@ -622,6 +719,8 @@ class Snake {
     const h = this.uniT > 0 ? this.uniHead : this.head;
     h.position.set(this.x, heightAt(this.x, this.z) + HEAD_R * 0.95, this.z);
     h.rotation.set(0, this.heading, this.turn * 0.25);
+    this.helmet.visible = world === 'space' && this.alive;
+    if (this.helmet.visible) { this.helmet.position.copy(h.position); this.helmet.rotation.copy(h.rotation); }
   }
   placeSegments() {
     const t = this.trail, m = tmpM;
@@ -747,7 +846,7 @@ function startGame() {
   updateCamera(0, true);
   state = 'playing';
   menu.classList.add('hidden'); over.classList.add('hidden'); hud.classList.remove('hidden'); muteBtn.classList.remove('hidden');
-  music.unlock(); music.init(); music.resume(); music.play(TRACK_NORMAL);
+  music.unlock(); if (!NO_MUSIC) { music.init(); music.resume(); music.play(WORLD_TRACK[world]); }
 }
 function gameOver() {
   state = 'over';
@@ -767,9 +866,10 @@ function step(dt) {
   updateFoods(dt);
   updateCamera(dt, false);
   if (cloudMesh) cloudMesh.rotation.y += dt * 0.004;
+  animateUfos(dt);
   lavaTex.offset.x += dt * 0.03; lavaTex.offset.y += dt * 0.02;
   if (waterMesh) { waterMesh.material.map.offset.x += dt * 0.012; waterMesh.material.map.offset.y += dt * 0.007; }
-  if (music.track) music.play(player.uniT > 0 ? TRACK_MAGIC : TRACK_NORMAL);
+  if (music.track) music.play(player.uniT > 0 ? TRACK_MAGIC : WORLD_TRACK[world]);
   scoreEl.textContent = score; lenEl.textContent = player.len;
   aliveEl.textContent = snakes.filter(s => s.alive && !s.isPlayer).length;
 }
@@ -793,6 +893,14 @@ const TW_CH_A = [[Cmaj,2],[Cmaj,2],[Fmaj,2],[Cmaj,2],[Fmaj,2],[Cmaj,2],[Gmaj,2],
 const TW_CH_B = [[Cmaj,2],[Gmaj,2],[Cmaj,2],[Gmaj,2]];
 const TRACK_MAGIC = { bpm: 96, lead: [...TW_A, ...TW_B, ...TW_B, ...TW_A],
   chords: [...TW_CH_A, ...TW_CH_B, ...TW_CH_B, ...TW_CH_A], style: 'magic' };
+// Space: the opening of Strauss's "Also sprach Zarathustra" once, then an ambient A-minor loop.
+const Am = [57, 60, 64], Fm = [53, 57, 60], Cm = [48, 52, 55], Gm = [55, 59, 62];
+const SP_LEAD = [[69,2],[72,1],[76,1],[74,3],[null,1],[72,2],[69,1],[67,1],[64,4],[69,2],[71,1],[72,1],[67,3],[null,1],[76,2],[74,1],[72,1],[69,4]];
+const SP_CH = [[Am,4],[Fm,4],[Cm,4],[Gm,4],[Am,4],[Fm,4],[Cm,4],[Gm,4]];
+const SP_BASS = [];
+for (const r of [33, 29, 36, 31, 33, 29, 36, 31]) for (let k = 0; k < 8; k++) SP_BASS.push([k % 4 === 3 ? r + 7 : r, .5]);
+const TRACK_SPACE = { bpm: 100, intro: [[36,2],[43,2],[48,4],[52,1.5],[51,4]], lead: SP_LEAD, chords: SP_CH, bass: SP_BASS, style: 'space' };
+const WORLD_TRACK = { forest: TRACK_NORMAL, beach: TRACK_NORMAL, space: TRACK_SPACE };
 
 // iOS mutes Web Audio under the ring/silent switch unless an <audio> element is playing.
 // Looping a silent clip (started inside the user's tap) switches the session to playback mode.
@@ -816,6 +924,9 @@ const music = {
     const len = this.ctx.sampleRate * 0.2, buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     this.noise = buf;
+    this.echo = this.ctx.createDelay(1); this.echo.delayTime.value = 0.36;
+    const fb = this.ctx.createGain(); fb.gain.value = 0.33; this.echo.connect(fb); fb.connect(this.echo);
+    this.echoIn = this.ctx.createGain(); this.echoIn.connect(this.master); this.echoIn.connect(this.echo); this.echo.connect(this.master);
     this.timer = setInterval(() => this.tick(), 60);
   },
   resume() { if (this.ctx && this.ctx.state !== 'running') { const pr = this.ctx.resume(); if (pr && pr.catch) pr.catch(() => {}); } },
@@ -826,8 +937,14 @@ const music = {
   },
   play(track) {
     if (!this.ctx || this.track === track) return;
+    const fresh = this.track === null;
     this.track = track;
-    const t0 = this.ctx.currentTime + 0.15;
+    let t0 = this.ctx.currentTime + 0.15;
+    if (track.intro && fresh) {
+      let t = t0;
+      for (const [n, b] of track.intro) { const d = b * 60 / track.bpm; this.brass(n, t, d); t += d; }
+      t0 = t + 0.4;
+    }
     const voice = (seq, fn) => ({ seq, fn, i: 0, next: t0 });
     this.voices = [voice(track.lead, (n, t, dur) => this.lead(n, t, dur))];
     if (track.bass) this.voices.push(voice(track.bass, (n, t, dur) => this.bass(n, t, dur)));
@@ -847,12 +964,19 @@ const music = {
     }
   },
   freq: m => 440 * Math.pow(2, (m - 69) / 12),
-  env(t, a, peak, dec, sus, dur, rel) {
+  env(t, a, peak, dec, sus, dur, rel, dest) {
     const g = this.ctx.createGain(), p = g.gain;
     p.setValueAtTime(0.0001, t); p.linearRampToValueAtTime(peak, t + a);
     p.exponentialRampToValueAtTime(Math.max(sus, 0.0001), t + a + dec);
     p.setValueAtTime(Math.max(sus, 0.0001), t + dur); p.exponentialRampToValueAtTime(0.0001, t + dur + rel);
-    g.connect(this.master); return g;
+    g.connect(dest || this.master); return g;
+  },
+  brass(n, t, dur) {
+    const f = this.freq(n);
+    const g = this.env(t, 0.1, 0.11, 0.3, 0.08, dur * 0.95, 0.25);
+    const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1100; lp.connect(g);
+    this.osc('sawtooth', f, t, t + dur + 0.4, lp, -7); this.osc('sawtooth', f, t, t + dur + 0.4, lp, 7);
+    this.osc('sine', f / 2, t, t + dur + 0.4, this.env(t, 0.1, 0.1, 0.3, 0.08, dur * 0.95, 0.25));
   },
   osc(type, f, t, end, dest, detune = 0) {
     const o = this.ctx.createOscillator(); o.type = type; o.frequency.value = f; o.detune.value = detune;
@@ -864,6 +988,9 @@ const music = {
       const g = this.env(t, 0.01, 0.13, 0.08, 0.07, dur * 0.85, 0.05);
       const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200; lp.connect(g);
       this.osc('square', f, t, t + dur + 0.1, lp);
+    } else if (this.track.style === 'space') {
+      const g = this.env(t, 0.25, 0.09, 0.3, 0.07, dur * 0.9, 0.4, this.echoIn);
+      this.osc('sine', f, t, t + dur + 0.6, g); this.osc('triangle', f * 2, t, t + dur + 0.6, g, 4);
     } else this.bell(f, t, 0.16);
   },
   bell(f, t, vol) {
@@ -875,6 +1002,11 @@ const music = {
     this.osc('triangle', f * 2, t, t + 1.1, g3);
   },
   bass(n, t, dur) {
+    if (this.track.style === 'space') {
+      this.osc('sine', this.freq(n), t, t + dur + 0.1, this.env(t, 0.01, 0.16, 0.15, 0.02, dur * 0.6, 0.05));
+      this.osc('triangle', this.freq(n), t, t + dur + 0.1, this.env(t, 0.01, 0.05, 0.1, 0.01, dur * 0.5, 0.05));
+      return;
+    }
     const g = this.env(t, 0.01, 0.22, 0.1, 0.12, dur * 0.8, 0.05);
     this.osc('triangle', this.freq(n), t, t + dur + 0.1, g);
   },
@@ -884,10 +1016,19 @@ const music = {
     const g = this.env(t, 0.002, 0.05, 0.04, 0.0001, 0.04, 0.02); src.connect(hp); hp.connect(g); src.start(t); src.stop(t + 0.1);
   },
   chord(ch, t, dur) {
+    const space = this.track.style === 'space';
     // soft pad
-    const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;
-    const g = this.env(t, 0.25, 0.035, 0.3, 0.03, dur, 0.4); lp.connect(g);
+    const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = space ? 420 : 700;
+    const g = this.env(t, space ? 0.8 : 0.25, space ? 0.045 : 0.035, 0.3, space ? 0.04 : 0.03, dur, space ? 1.0 : 0.4); lp.connect(g);
     for (const n of ch.slice(0, 3)) { this.osc('sawtooth', this.freq(n), t, t + dur + 0.5, lp, -6); this.osc('sawtooth', this.freq(n), t, t + dur + 0.5, lp, 6); }
+    if (space) {
+      const step = dur / 4;
+      for (let k = 0; k < 4; k++) if (Math.random() < 0.6) {
+        const f = this.freq(ch[(k * 2 + 1) % ch.length] + 24);
+        this.osc('sine', f, t + k * step, t + k * step + 0.5, this.env(t + k * step, 0.005, 0.05, 0.3, 0.0001, 0.3, 0.05, this.echoIn));
+      }
+      return;
+    }
     // harp-like arpeggio up and down in 16ths
     const notes = [...ch.map(T), ...ch.slice(1, 3).reverse().map(T)];
     const step = dur / 8;
@@ -921,6 +1062,8 @@ document.getElementById('play').addEventListener('click', startGame);
 document.getElementById('again').addEventListener('click', startGame);
 document.getElementById('toMenu').addEventListener('click', () => { over.classList.add('hidden'); hud.classList.add('hidden'); muteBtn.classList.add('hidden'); menu.classList.remove('hidden'); state = 'menu'; music.stop(); });
 
+const NO_MUSIC = new URLSearchParams(location.search).has('nomusic');
+
 // ---------------- renderer / loop ----------------
 renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -938,6 +1081,7 @@ function animate() {
     const a = time * 0.08;
     camera.position.set(Math.sin(a) * 60, 22, Math.cos(a) * 60); camera.lookAt(0, 4, 0);
     if (cloudMesh) cloudMesh.rotation.y += dt * 0.004;
+    animateUfos(dt); lavaTex.offset.x += dt * 0.03;
   } else step(dt);
   renderer.render(scene, camera);
 }
