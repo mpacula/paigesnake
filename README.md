@@ -13,6 +13,13 @@ Everything is a static site (one HTML file plus Three.js), so there is no build 
 - Configurable number of CPU snakes (0 to 10)
 - Eat snacks (apples, bananas, popsicles) to grow
 - Bump another snake's body with your head to eat it; it turns into snacks
+- Lava pools (1 or 2 per world) set the snake on fire and shrink it; stay out
+- A rare unicorn snack turns the snake into a rainbow snake with a unicorn head
+- Music: synthesized in the browser with Web Audio, no audio files. Normal play
+  is a chiptune "Ode to Joy" (Beethoven); unicorn mode switches to a bell-and-harp
+  "Twinkle, Twinkle, Little Star". Both tunes are public domain and the
+  arrangements are original, so there is nothing to license. Toggle with the
+  speaker button or the Music checkbox in the menu
 - Works offline once loaded (service worker); add it to the iPad home screen for a full-screen icon
 
 ## Controls
@@ -30,4 +37,5 @@ python3 -m http.server 8000
 ```
 
 `index.html?play=forest&cpu=4` (or `play=beach`) skips the menu, which is handy while iterating.
+Add `&at=pool` to start next to a lava pool, `&burn=1` to start on fire, `&unicorn=1` to start in unicorn mode.
 Bump `CACHE` in `sw.js` when you want to force clients to refetch assets.

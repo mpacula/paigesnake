@@ -33,6 +33,8 @@
   .btn.secondary{background:rgba(255,255,255,.2);color:#fff;box-shadow:none;font-size:20px;padding:12px 32px}
   #hud{position:fixed;top:max(12px,env(safe-area-inset-top));left:0;right:0;display:flex;justify-content:center;
     gap:28px;color:#fff;font-weight:800;font-size:22px;text-shadow:0 2px 6px rgba(0,0,0,.6);pointer-events:none}
+  #mute{position:fixed;top:max(10px,env(safe-area-inset-top));right:14px;font-size:26px;background:rgba(0,0,0,.25);
+    border:0;border-radius:999px;width:48px;height:48px;color:#fff;pointer-events:auto;cursor:pointer}
   .hint{opacity:.85;font-size:17px;max-width:440px;line-height:1.4}
 </style>
 </head>
@@ -44,6 +46,7 @@
   <span>📏 <b id="len">6</b></span>
   <span>🐍 <b id="alive">0</b></span>
 </div>
+<button id="mute" class="hidden" aria-label="Toggle music">🔊</button>
 
 <div id="menu" class="overlay">
   <h1>🐍 Paige's Snake</h1>
@@ -52,6 +55,7 @@
     <div class="card" data-world="beach"><span class="emoji">🏖️</span>Beach</div>
   </div>
   <div class="row"><label for="cpu">Other snakes</label><input id="cpu" type="range" min="0" max="10" value="4"><b id="cpuVal">4</b></div>
+  <div class="row"><label><input id="musicOn" type="checkbox" checked> Music</label></div>
   <button id="play" class="btn">Play</button>
   <p class="hint">Touch the left or right side of the screen to turn. Touch both sides to go fast.
     Eat snacks to grow. Bump another snake's body with your head to eat it!</p>
@@ -664,7 +668,7 @@ function kill(victim, killer) {
 function eatFood(s, i) {
   const f = foods[i]; scene.remove(f.g); foods.splice(i, 1);
   s.len = Math.min(MAX_SEG, s.len + 1);
-  if (f.type === 'unicorn') { s.setUnicorn(true); if (s.isPlayer) score += 3; }
+  if (f.type === 'unicorn') { s.setUnicorn(true); if (s.isPlayer) { score += 3; music.sparkle(); } }
   if (s.isPlayer) score += 1;
   if (foods.length < FOOD_COUNT) spawnFood();
 }
@@ -742,7 +746,8 @@ function startGame() {
   for (let i = 0; i < FOOD_COUNT; i++) spawnFood();
   updateCamera(0, true);
   state = 'playing';
-  menu.classList.add('hidden'); over.classList.add('hidden'); hud.classList.remove('hidden');
+  menu.classList.add('hidden'); over.classList.add('hidden'); hud.classList.remove('hidden'); muteBtn.classList.remove('hidden');
+  music.init(); music.resume(); music.play(TRACK_NORMAL);
 }
 function gameOver() {
   state = 'over';
@@ -764,13 +769,138 @@ function step(dt) {
   if (cloudMesh) cloudMesh.rotation.y += dt * 0.004;
   lavaTex.offset.x += dt * 0.03; lavaTex.offset.y += dt * 0.02;
   if (waterMesh) { waterMesh.material.map.offset.x += dt * 0.012; waterMesh.material.map.offset.y += dt * 0.007; }
+  if (music.track) music.play(player.uniT > 0 ? TRACK_MAGIC : TRACK_NORMAL);
   scoreEl.textContent = score; lenEl.textContent = player.len;
   aliveEl.textContent = snakes.filter(s => s.alive && !s.isPlayer).length;
 }
 
+// ---------------- music (synthesized, public-domain tunes) ----------------
+// Notes are [midi, beats]; null midi = rest. Bass/chords are [midi (or [triad]), beats].
+const C = 60, D = 62, E = 64, F = 65, G = 67, A = 69, B = 71;
+const ODE_A = [[E,1],[E,1],[F,1],[G,1],[G,1],[F,1],[E,1],[D,1],[C,1],[C,1],[D,1],[E,1],[E,1.5],[D,.5],[D,2]];
+const ODE_A2 = [[E,1],[E,1],[F,1],[G,1],[G,1],[F,1],[E,1],[D,1],[C,1],[C,1],[D,1],[E,1],[D,1.5],[C,.5],[C,2]];
+const ODE_B = [[D,1],[D,1],[E,1],[C,1],[D,1],[E,.5],[F,.5],[E,1],[C,1],[D,1],[E,.5],[F,.5],[E,1],[D,1],[C,1],[D,1],[G-12,2]];
+const ODE_BASS_A = [[36,2],[36,2],[36,2],[43,2],[36,2],[36,2],[43,2],[43,2]];
+const ODE_BASS_A2 = [[36,2],[36,2],[36,2],[43,2],[36,2],[43,2],[36,2],[36,2]];
+const ODE_BASS_B = [[43,2],[43,2],[36,2],[43,2],[36,2],[41,2],[36,2],[31,2]];
+const TRACK_NORMAL = { bpm: 160, lead: [...ODE_A, ...ODE_A2, ...ODE_B, ...ODE_A2],
+  bass: [...ODE_BASS_A, ...ODE_BASS_A2, ...ODE_BASS_B, ...ODE_BASS_A2], style: 'chip' };
+const T = m => m + 12;
+const TW_A = [[T(C),1],[T(C),1],[T(G),1],[T(G),1],[T(A),1],[T(A),1],[T(G),2],[T(F),1],[T(F),1],[T(E),1],[T(E),1],[T(D),1],[T(D),1],[T(C),2]];
+const TW_B = [[T(G),1],[T(G),1],[T(F),1],[T(F),1],[T(E),1],[T(E),1],[T(D),2]];
+const Cmaj = [48,52,55,60], Fmaj = [53,57,60,65], Gmaj = [55,59,62,67];
+const TW_CH_A = [[Cmaj,2],[Cmaj,2],[Fmaj,2],[Cmaj,2],[Fmaj,2],[Cmaj,2],[Gmaj,2],[Cmaj,2]];
+const TW_CH_B = [[Cmaj,2],[Gmaj,2],[Cmaj,2],[Gmaj,2]];
+const TRACK_MAGIC = { bpm: 96, lead: [...TW_A, ...TW_B, ...TW_B, ...TW_A],
+  chords: [...TW_CH_A, ...TW_CH_B, ...TW_CH_B, ...TW_CH_A], style: 'magic' };
+
+const music = {
+  ctx: null, master: null, enabled: true, track: null, timer: null,
+  voices: [], noise: null,
+  init() {
+    if (this.ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain(); this.master.gain.value = this.enabled ? 1 : 0;
+    const comp = this.ctx.createDynamicsCompressor(); this.master.connect(comp); comp.connect(this.ctx.destination);
+    const len = this.ctx.sampleRate * 0.2, buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    this.noise = buf;
+    this.timer = setInterval(() => this.tick(), 60);
+  },
+  resume() { if (this.ctx && this.ctx.state !== 'running') this.ctx.resume(); },
+  setEnabled(on) {
+    this.enabled = on;
+    if (this.master) this.master.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.05);
+    muteBtn.textContent = on ? '🔊' : '🔇'; musicChk.checked = on;
+  },
+  play(track) {
+    if (!this.ctx || this.track === track) return;
+    this.track = track;
+    const t0 = this.ctx.currentTime + 0.15;
+    const voice = (seq, fn) => ({ seq, fn, i: 0, next: t0 });
+    this.voices = [voice(track.lead, (n, t, dur) => this.lead(n, t, dur))];
+    if (track.bass) this.voices.push(voice(track.bass, (n, t, dur) => this.bass(n, t, dur)));
+    if (track.chords) this.voices.push(voice(track.chords, (ch, t, dur) => this.chord(ch, t, dur)));
+    if (track.style === 'chip') this.voices.push(voice([[1, .5]], (n, t) => this.hat(t)));
+  },
+  stop() { this.track = null; this.voices = []; },
+  tick() {
+    if (!this.track) return;
+    const until = this.ctx.currentTime + 0.25, spb = 60 / this.track.bpm;
+    for (const v of this.voices) {
+      while (v.next < until) {
+        const [n, beats] = v.seq[v.i]; const dur = beats * spb;
+        if (n !== null) v.fn(n, v.next, dur);
+        v.next += dur; v.i = (v.i + 1) % v.seq.length;
+      }
+    }
+  },
+  freq: m => 440 * Math.pow(2, (m - 69) / 12),
+  env(t, a, peak, dec, sus, dur, rel) {
+    const g = this.ctx.createGain(), p = g.gain;
+    p.setValueAtTime(0.0001, t); p.linearRampToValueAtTime(peak, t + a);
+    p.exponentialRampToValueAtTime(Math.max(sus, 0.0001), t + a + dec);
+    p.setValueAtTime(Math.max(sus, 0.0001), t + dur); p.exponentialRampToValueAtTime(0.0001, t + dur + rel);
+    g.connect(this.master); return g;
+  },
+  osc(type, f, t, end, dest, detune = 0) {
+    const o = this.ctx.createOscillator(); o.type = type; o.frequency.value = f; o.detune.value = detune;
+    o.connect(dest); o.start(t); o.stop(end); return o;
+  },
+  lead(n, t, dur) {
+    const f = this.freq(n);
+    if (this.track.style === 'chip') {
+      const g = this.env(t, 0.01, 0.13, 0.08, 0.07, dur * 0.85, 0.05);
+      const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200; lp.connect(g);
+      this.osc('square', f, t, t + dur + 0.1, lp);
+    } else this.bell(f, t, 0.16);
+  },
+  bell(f, t, vol) {
+    const g = this.env(t, 0.004, vol, 1.4, 0.0001, 1.4, 0.1);
+    this.osc('sine', f, t, t + 1.6, g);
+    const g2 = this.env(t, 0.004, vol * 0.35, 0.5, 0.0001, 0.5, 0.1);
+    this.osc('sine', f * 2.76, t, t + 0.7, g2);
+    const g3 = this.env(t, 0.004, vol * 0.5, 0.9, 0.0001, 0.9, 0.1);
+    this.osc('triangle', f * 2, t, t + 1.1, g3);
+  },
+  bass(n, t, dur) {
+    const g = this.env(t, 0.01, 0.22, 0.1, 0.12, dur * 0.8, 0.05);
+    this.osc('triangle', this.freq(n), t, t + dur + 0.1, g);
+  },
+  hat(t) {
+    const src = this.ctx.createBufferSource(); src.buffer = this.noise;
+    const hp = this.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+    const g = this.env(t, 0.002, 0.05, 0.04, 0.0001, 0.04, 0.02); src.connect(hp); hp.connect(g); src.start(t); src.stop(t + 0.1);
+  },
+  chord(ch, t, dur) {
+    // soft pad
+    const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;
+    const g = this.env(t, 0.25, 0.035, 0.3, 0.03, dur, 0.4); lp.connect(g);
+    for (const n of ch.slice(0, 3)) { this.osc('sawtooth', this.freq(n), t, t + dur + 0.5, lp, -6); this.osc('sawtooth', this.freq(n), t, t + dur + 0.5, lp, 6); }
+    // harp-like arpeggio up and down in 16ths
+    const notes = [...ch.map(T), ...ch.slice(1, 3).reverse().map(T)];
+    const step = dur / 8;
+    for (let k = 0; k < 8; k++) {
+      const f = this.freq(notes[k % notes.length] + 12);
+      const ag = this.env(t + k * step, 0.003, 0.05, 0.35, 0.0001, 0.35, 0.05);
+      this.osc('triangle', f, t + k * step, t + k * step + 0.5, ag);
+    }
+  },
+  sparkle() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    [72, 76, 79, 84, 88, 91, 96].forEach((n, i) => this.bell(this.freq(n), t + i * 0.07, 0.12));
+  },
+};
+
 // ---------------- UI wiring ----------------
 const menu = document.getElementById('menu'), over = document.getElementById('over'), hud = document.getElementById('hud');
 const scoreEl = document.getElementById('score'), lenEl = document.getElementById('len'), aliveEl = document.getElementById('alive');
+const muteBtn = document.getElementById('mute'), musicChk = document.getElementById('musicOn');
+muteBtn.addEventListener('click', () => music.setEnabled(!music.enabled));
+musicChk.addEventListener('change', () => music.setEnabled(musicChk.checked));
+document.addEventListener('visibilitychange', () => { if (music.ctx) { if (document.hidden) music.ctx.suspend(); else if (state !== 'menu') music.ctx.resume(); } });
 document.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => {
   document.querySelectorAll('.card').forEach(x => x.classList.remove('sel')); c.classList.add('sel'); world = c.dataset.world;
 }));
@@ -778,7 +908,7 @@ const cpuIn = document.getElementById('cpu');
 cpuIn.addEventListener('input', () => { cpuCount = +cpuIn.value; document.getElementById('cpuVal').textContent = cpuIn.value; });
 document.getElementById('play').addEventListener('click', startGame);
 document.getElementById('again').addEventListener('click', startGame);
-document.getElementById('toMenu').addEventListener('click', () => { over.classList.add('hidden'); hud.classList.add('hidden'); menu.classList.remove('hidden'); state = 'menu'; });
+document.getElementById('toMenu').addEventListener('click', () => { over.classList.add('hidden'); hud.classList.add('hidden'); muteBtn.classList.add('hidden'); menu.classList.remove('hidden'); state = 'menu'; music.stop(); });
 
 // ---------------- renderer / loop ----------------
 renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
