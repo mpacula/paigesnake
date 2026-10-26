@@ -33,8 +33,9 @@
   .btn.secondary{background:rgba(255,255,255,.2);color:#fff;box-shadow:none;font-size:20px;padding:12px 32px}
   #hud{position:fixed;top:max(12px,env(safe-area-inset-top));left:0;right:0;display:flex;justify-content:center;
     gap:28px;color:#fff;font-weight:800;font-size:22px;text-shadow:0 2px 6px rgba(0,0,0,.6);pointer-events:none}
-  #mute{position:fixed;top:max(10px,env(safe-area-inset-top));right:14px;font-size:26px;background:rgba(0,0,0,.25);
+  #mute,#home{position:fixed;top:max(10px,env(safe-area-inset-top));right:14px;font-size:26px;background:rgba(0,0,0,.25);
     border:0;border-radius:999px;width:48px;height:48px;color:#fff;pointer-events:auto;cursor:pointer}
+  #home{right:auto;left:14px}
   #fire{position:fixed;left:50%;bottom:max(22px,env(safe-area-inset-bottom));transform:translateX(-50%);width:104px;height:104px;
     border-radius:999px;border:4px solid rgba(255,255,255,.7);background:rgba(255,120,40,.75);color:#fff;font-size:38px;font-weight:800;
     pointer-events:auto;cursor:pointer;box-shadow:0 0 24px rgba(255,140,40,.6);touch-action:none;-webkit-user-select:none;user-select:none}
@@ -51,6 +52,7 @@
   <span>🐍 <b id="alive">0</b></span>
 </div>
 <button id="mute" class="hidden" aria-label="Toggle music">🔊</button>
+<button id="home" class="hidden" aria-label="Start over">🏠</button>
 <button id="fire" class="hidden" aria-label="Fire">🔫<small id="fireT">15</small></button>
 
 <div id="menu" class="overlay">
@@ -816,7 +818,8 @@ class Snake {
     for (let i = 0; i < 14; i++) this.fire.add(new THREE.Mesh(fireGeo, fireMats[i % 3]));
     this.burnT = 0; this.shrinkT = 0;
     scene.add(this.body, this.head, this.uniHead, this.fire, this.helmet, this.gun);
-    this.wobble = Math.random() * 100; this.thinkT = 0; this.target = null;
+    this.wobble = Math.random() * 100; this.thinkT = 0; this.target = null; this.skip = new Map();
+    this.jinkT = rnd(3, 8); this.jinkLeft = 0; this.jinkDir = 1; // every few seconds a CPU snake makes a short random swerve, so no steady-state pattern can trap it
     this.x = 0; this.z = 0; this.y = 0; this.vy = 0; this.climb = 0; this.air = false; this.heading = 0; this.trail = []; this.trailLen = 0;
     this.segY = new Float32Array(MAX_SEG);
     for (const o of [this.head, this.uniHead, this.helmet, this.gun]) o.rotation.order = 'YXZ';
@@ -888,8 +891,17 @@ class Snake {
     this.thinkT -= dt;
     if (this.thinkT <= 0) {
       this.thinkT = rnd(0.25, 0.55);
+      // a snack that is close but well off our heading is inside our turning circle: chasing it just orbits it forever.
+      // skip such snacks for a few seconds and run straight so we can come back at it from further away.
+      if (this.target && this.target.food && !this.target.wander) {
+        const f = this.target.food, d = Math.hypot(f.x - this.x, f.z - this.z);
+        const off = Math.abs(wrapAngle(Math.atan2(f.x - this.x, f.z - this.z) - this.heading));
+        const tr = this.speed * (this.boost ? 1.65 : 1) / TURN_RATE, fwd = d * Math.cos(off), lat = d * Math.sin(off);
+        if (d < 3 * tr && Math.hypot(lat - tr, fwd) < tr * 1.1) { this.skip.set(f, time + 1.6); this.target = { x: this.x + Math.sin(this.heading) * 20, z: this.z + Math.cos(this.heading) * 20, wander: true }; this.thinkT = 0.8; return; }
+      }
+      for (const [f, until] of this.skip) if (until < time || !foods.includes(f)) this.skip.delete(f);
       let best = null, bestD = 1e9;
-      for (const f of foods) { const d = Math.hypot(f.x - this.x, f.z - this.z) * (f.type === 'unicorn' ? 0.5 : f.type === 'blaster' ? 0.7 : 1); if (d < bestD) { bestD = d; best = { x: f.x, z: f.z }; } }
+      for (const f of foods) { if (this.skip.has(f)) continue; const d = Math.hypot(f.x - this.x, f.z - this.z) * (f.type === 'unicorn' ? 0.5 : f.type === 'blaster' ? 0.7 : 1); if (d < bestD) { bestD = d; best = { x: f.x, z: f.z, food: f }; } }
       if (this.armT > 0) {
         for (const o of snakes) {
           if (o === this || !o.alive) continue;
@@ -923,6 +935,9 @@ class Snake {
       }
       this.target = best;
     }
+    this.jinkT -= dt;
+    if (this.jinkT <= 0) { this.jinkT = rnd(3, 8); this.jinkLeft = rnd(0.35, 0.8); this.jinkDir = Math.random() < 0.5 ? -1 : 1; }
+    if (this.jinkLeft > 0) { this.jinkLeft -= dt; this.turn = this.jinkDir; return; }
     if (this.target) {
       const desired = Math.atan2(this.target.x - this.x, this.target.z - this.z);
       const diff = wrapAngle(desired - this.heading) + Math.sin(time * 1.3 + this.wobble) * 0.25;
@@ -1151,7 +1166,7 @@ function startGame() {
   for (let i = 0; i < FOOD_COUNT; i++) spawnFood();
   updateCamera(0, true);
   state = 'playing';
-  menu.classList.add('hidden'); over.classList.add('hidden'); hud.classList.remove('hidden'); muteBtn.classList.remove('hidden');
+  menu.classList.add('hidden'); over.classList.add('hidden'); hud.classList.remove('hidden'); muteBtn.classList.remove('hidden'); homeBtn.classList.remove('hidden');
   music.unlock(); if (!NO_MUSIC) { music.init(); music.resume(); music.play(WORLD_TRACK[world]); }
 }
 function gameOver() {
@@ -1430,7 +1445,13 @@ const cpuIn = document.getElementById('cpu');
 cpuIn.addEventListener('input', () => { cpuCount = +cpuIn.value; document.getElementById('cpuVal').textContent = cpuIn.value; });
 document.getElementById('play').addEventListener('click', startGame);
 document.getElementById('again').addEventListener('click', startGame);
-document.getElementById('toMenu').addEventListener('click', () => { over.classList.add('hidden'); hud.classList.add('hidden'); muteBtn.classList.add('hidden'); fireBtn.classList.add('hidden'); menu.classList.remove('hidden'); state = 'menu'; music.stop(); });
+function toMenu() {
+  over.classList.add('hidden'); hud.classList.add('hidden'); muteBtn.classList.add('hidden'); homeBtn.classList.add('hidden'); fireBtn.classList.add('hidden');
+  menu.classList.remove('hidden'); state = 'menu'; fireHeld = false; pointers.clear(); keys.clear(); music.stop();
+}
+document.getElementById('toMenu').addEventListener('click', toMenu);
+const homeBtn = document.getElementById('home');
+homeBtn.addEventListener('click', toMenu);
 
 const NO_MUSIC = new URLSearchParams(location.search).has('nomusic');
 
