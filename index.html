@@ -35,6 +35,10 @@
     gap:28px;color:#fff;font-weight:800;font-size:22px;text-shadow:0 2px 6px rgba(0,0,0,.6);pointer-events:none}
   #mute{position:fixed;top:max(10px,env(safe-area-inset-top));right:14px;font-size:26px;background:rgba(0,0,0,.25);
     border:0;border-radius:999px;width:48px;height:48px;color:#fff;pointer-events:auto;cursor:pointer}
+  #fire{position:fixed;left:50%;bottom:max(22px,env(safe-area-inset-bottom));transform:translateX(-50%);width:104px;height:104px;
+    border-radius:999px;border:4px solid rgba(255,255,255,.7);background:rgba(255,120,40,.75);color:#fff;font-size:38px;font-weight:800;
+    pointer-events:auto;cursor:pointer;box-shadow:0 0 24px rgba(255,140,40,.6);touch-action:none;-webkit-user-select:none;user-select:none}
+  #fire small{display:block;font-size:16px;margin-top:-4px}
   .hint{opacity:.85;font-size:17px;max-width:440px;line-height:1.4}
 </style>
 </head>
@@ -47,6 +51,7 @@
   <span>🐍 <b id="alive">0</b></span>
 </div>
 <button id="mute" class="hidden" aria-label="Toggle music">🔊</button>
+<button id="fire" class="hidden" aria-label="Fire">🔫<small id="fireT">15</small></button>
 
 <div id="menu" class="overlay">
   <h1>🐍 Paige's Snake</h1>
@@ -59,7 +64,8 @@
   <div class="row"><label><input id="musicOn" type="checkbox" checked> Music</label></div>
   <button id="play" class="btn">Play</button>
   <p class="hint">Touch the left or right side of the screen to turn. Touch both sides to go fast.
-    Eat snacks to grow. Bump another snake's body with your head to eat it!</p>
+    Eat snacks to grow. Bump another snake's body with your head to eat it!
+    Grab a 🔫 blaster and hold the fire button to zap other snakes.</p>
 </div>
 
 <div id="over" class="overlay hidden">
@@ -489,6 +495,7 @@ function buildWorld() {
 // ---------------- food ----------------
 const FOOD_TYPES = ['apple', 'banana', 'popsicle'];
 const UNICORN_CHANCE = 0.04, UNICORN_TIME = 20;
+const BLASTER_CHANCE = UNICORN_CHANCE * 2, BLASTER_TIME = 15, BOLT_SPEED = 42, BOLT_LIFE = 1.6;
 const RAINBOW = [0xff3b5c, 0xff8c1a, 0xffe03a, 0x3ddc84, 0x3aa0ff, 0x9b5de5];
 const FG = {
   sphere: new THREE.SphereGeometry(0.75, 12, 10), stem: new THREE.CylinderGeometry(0.06, 0.08, 0.5, 6),
@@ -500,7 +507,8 @@ const FG = {
 const FM = {
   apple: lam(0xe5322d), stem: lam(0x6b4a2b), leaf: lam(0x3fa34d, { side: THREE.DoubleSide }),
   banana: lam(0xffd93b), pops: [lam(0xff6fb5), lam(0x6fd3ff), lam(0xb57bff)], stick: lam(0xe8d8b0),
-  white: lam(0xffffff), gold: lam(0xffc83a, { emissive: 0x6a4a00 }), pink: lam(0xffa5d8), rainbow: RAINBOW.map(c => lam(c)),
+  white: lam(0xffffff), gold: lam(0xffc83a, { emissive: 0x6a4a00 }),
+  gunBody: lam(0x3a86ff), gunBarrel: lam(0xff8c1a, { emissive: 0x7a3a00 }), gunGrip: lam(0x2b2f3a), bolt: new THREE.MeshBasicMaterial({ color: 0xffe76a }), pink: lam(0xffa5d8), rainbow: RAINBOW.map(c => lam(c)),
 };
 // unicorn features (horn, ears, mane) on a parent; scale 1 fits the snake head
 function addUnicornBits(g, scale = 1) {
@@ -511,9 +519,21 @@ function addUnicornBits(g, scale = 1) {
   }
   g.scale.setScalar(scale);
 }
+function makeBlaster(scale = 1) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(GEO.box, FM.gunBody); body.scale.set(0.45, 0.4, 1.1); g.add(body);
+  const barrel = new THREE.Mesh(GEO.cyl, FM.gunBarrel); barrel.scale.set(0.14, 0.9, 0.14); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.05, 0.95); g.add(barrel);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.06, 6, 12), FM.gunBarrel); ring.position.set(0, 0.05, 1.3); g.add(ring);
+  const grip = new THREE.Mesh(GEO.box, FM.gunGrip); grip.scale.set(0.3, 0.6, 0.3); grip.position.set(0, -0.45, -0.3); grip.rotation.x = 0.3; g.add(grip);
+  const flash = new THREE.Mesh(GEO.sphere, FM.bolt); flash.position.set(0, 0.05, 1.5); flash.scale.setScalar(0.001); flash.name = 'flash'; g.add(flash);
+  g.scale.setScalar(scale);
+  return g;
+}
 function makeFoodMesh(type) {
   const g = new THREE.Group();
-  if (type === 'apple') {
+  if (type === 'blaster') {
+    const b = makeBlaster(0.9); b.position.y = 0.3; b.rotation.z = 0.2; g.add(b);
+  } else if (type === 'apple') {
     g.add(new THREE.Mesh(FG.sphere, FM.apple));
     const s = new THREE.Mesh(FG.stem, FM.stem); s.position.y = 0.85; g.add(s);
     const l = new THREE.Mesh(FG.leaf, FM.leaf); l.position.set(0.25, 0.9, 0); l.rotation.set(-0.6, 0.3, 0.4); g.add(l);
@@ -540,6 +560,7 @@ function spawnFood(x, z, type) {
     }
   }
   if (!type && Math.random() < UNICORN_CHANCE && !foods.some(f => f.type === 'unicorn')) type = 'unicorn';
+  if (!type && Math.random() < BLASTER_CHANCE && foods.filter(f => f.type === 'blaster').length < 2) type = 'blaster';
   type = type || FOOD_TYPES[Math.floor(Math.random() * FOOD_TYPES.length)];
   const g = makeFoodMesh(type);
   const baseY = heightAt(x, z) + 1.0;
@@ -550,7 +571,7 @@ function spawnFood(x, z, type) {
 function updateFoods(dt) {
   for (const f of foods) {
     f.g.position.y = f.baseY + Math.sin(time * 2.2 + f.phase) * 0.22;
-    f.g.rotation.y += dt * (f.type === 'unicorn' ? 2.5 : 1.2);
+    f.g.rotation.y += dt * (f.type === 'unicorn' || f.type === 'blaster' ? 2.5 : 1.2);
   }
 }
 
@@ -599,10 +620,11 @@ class Snake {
     const pack = new THREE.Mesh(GEO.box, MAT.pack); pack.scale.set(1.3, 1.1, 0.6); pack.position.set(0, -0.5, -1.6); this.helmet.add(pack);
     for (const sx of [-0.35, 0.35]) { const tank = new THREE.Mesh(GEO.cyl, MAT.suit); tank.scale.set(0.28, 1.0, 0.28); tank.position.set(sx, -0.45, -1.95); this.helmet.add(tank); }
     this.helmet.visible = false;
+    this.gun = makeBlaster(0.75); this.gun.visible = false; this.armT = 0; this.fireCd = 0; this.flashT = 0; this.firing = false;
     this.fire = new THREE.Group(); this.fire.visible = false;
     for (let i = 0; i < 14; i++) this.fire.add(new THREE.Mesh(fireGeo, fireMats[i % 3]));
     this.burnT = 0; this.shrinkT = 0;
-    scene.add(this.body, this.head, this.uniHead, this.fire, this.helmet);
+    scene.add(this.body, this.head, this.uniHead, this.fire, this.helmet, this.gun);
     this.wobble = Math.random() * 100; this.thinkT = 0; this.target = null;
     this.x = 0; this.z = 0; this.heading = 0; this.trail = []; this.trailLen = 0;
   }
@@ -613,11 +635,11 @@ class Snake {
     for (let i = 0; i <= n; i++) this.trail.push({ x: x - Math.sin(heading) * i * SEG_SPACING, z: z - Math.cos(heading) * i * SEG_SPACING });
     this.trailLen = n * SEG_SPACING;
     this.head.visible = true; this.target = null; this.thinkT = 0;
-    this.setBurning(false); this.setUnicorn(false);
+    this.setBurning(false); this.setUnicorn(false); this.armT = 0; this.gun.visible = false;
     this.placeSegments(); this.placeHead();
   }
   die() {
-    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.body.count = 0; this.setBurning(false); this.uniT = 0;
+    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.gun.visible = false; this.armT = 0; this.body.count = 0; this.setBurning(false); this.uniT = 0;
   }
   setUnicorn(on) {
     this.uniT = on ? UNICORN_TIME : 0;
@@ -628,6 +650,19 @@ class Snake {
     const c2 = this.color.clone().multiplyScalar(0.7), suit = new THREE.Color(0xf4f4f8);
     for (let i = 0; i < MAX_SEG; i++) this.body.setColorAt(i, world === 'space' ? (i % 4 === 3 ? this.color : suit) : (i % 4 < 2) ? this.color : c2);
     this.body.instanceColor.needsUpdate = true;
+  }
+  arm() { this.armT = BLASTER_TIME; this.fireCd = 0; }
+  shoot() {
+    if (!this.alive || this.armT <= 0 || this.fireCd > 0) return;
+    this.fireCd = this.isPlayer ? 0.28 : 0.6; this.flashT = 0.08;
+    const m = new THREE.Mesh(boltGeo, FM.bolt);
+    bolts.push({ x: this.x + Math.sin(this.heading) * 1.8, z: this.z + Math.cos(this.heading) * 1.8, heading: this.heading, owner: this, life: BOLT_LIFE, m });
+    scene.add(m); music.pew();
+  }
+  updateWeapon(dt) {
+    this.fireCd -= dt; this.flashT -= dt;
+    if (this.armT > 0) { this.armT -= dt; if (this.armT <= 0) this.gun.visible = false; }
+    const fl = this.gun.getObjectByName('flash'); if (fl) fl.scale.setScalar(this.flashT > 0 ? rnd(0.5, 0.9) : 0.001);
   }
   updateUnicorn(dt) {
     if (this.uniT <= 0) return;
@@ -667,7 +702,17 @@ class Snake {
     if (this.thinkT <= 0) {
       this.thinkT = rnd(0.25, 0.55);
       let best = null, bestD = 1e9;
-      for (const f of foods) { const d = Math.hypot(f.x - this.x, f.z - this.z) * (f.type === 'unicorn' ? 0.5 : 1); if (d < bestD) { bestD = d; best = { x: f.x, z: f.z }; } }
+      for (const f of foods) { const d = Math.hypot(f.x - this.x, f.z - this.z) * (f.type === 'unicorn' ? 0.5 : f.type === 'blaster' ? 0.7 : 1); if (d < bestD) { bestD = d; best = { x: f.x, z: f.z }; } }
+      if (this.armT > 0) {
+        for (const o of snakes) {
+          if (o === this || !o.alive) continue;
+          for (let k = -1; k < o.len; k += 4) {
+            const sx = k < 0 ? o.x : o.seg[k * 3], sz = k < 0 ? o.z : o.seg[k * 3 + 1];
+            const d = Math.hypot(sx - this.x, sz - this.z);
+            if (d < 45 && Math.abs(wrapAngle(Math.atan2(sx - this.x, sz - this.z) - this.heading)) < 0.2) { this.shoot(); k = o.len; }
+          }
+        }
+      }
       if (Math.random() < this.aggro) {
         for (const o of snakes) {
           if (o === this || !o.alive) continue;
@@ -713,7 +758,7 @@ class Snake {
     }
     this.placeSegments(); this.placeHead();
     if (inPool(this.x, this.z)) this.ignite();
-    this.updateFire(dt); this.updateUnicorn(dt);
+    this.updateFire(dt); this.updateUnicorn(dt); this.updateWeapon(dt);
   }
   placeHead() {
     const h = this.uniT > 0 ? this.uniHead : this.head;
@@ -721,6 +766,8 @@ class Snake {
     h.rotation.set(0, this.heading, this.turn * 0.25);
     this.helmet.visible = world === 'space' && this.alive;
     if (this.helmet.visible) { this.helmet.position.copy(h.position); this.helmet.rotation.copy(h.rotation); }
+    this.gun.visible = this.armT > 0 && this.alive;
+    if (this.gun.visible) { this.gun.position.copy(h.position); this.gun.position.y += HEAD_R + 0.25; this.gun.rotation.copy(h.rotation); }
   }
   placeSegments() {
     const t = this.trail, m = tmpM;
@@ -749,6 +796,34 @@ class Snake {
 }
 const tmpM = new THREE.Matrix4();
 
+const boltGeo = new THREE.SphereGeometry(0.38, 8, 6); boltGeo.scale(1, 1, 2.6);
+let bolts = [];
+function chop(victim, k, shooter) {
+  if (k < 2) { kill(victim, shooter); return; }
+  for (let j = k; j < victim.len; j += 2) spawnFood(victim.seg[j * 3], victim.seg[j * 3 + 1]);
+  victim.len = k;
+  if (shooter.isPlayer) score += 2;
+  music.zap();
+}
+function updateBolts(dt) {
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    const b = bolts[i];
+    b.life -= dt; b.x += Math.sin(b.heading) * BOLT_SPEED * dt; b.z += Math.cos(b.heading) * BOLT_SPEED * dt;
+    let hit = b.life <= 0 || Math.hypot(b.x, b.z) > R + 10;
+    if (!hit) for (const v of snakes) {
+      if (v === b.owner || !v.alive) continue;
+      if (Math.hypot(v.x - b.x, v.z - b.z) < HEAD_R + 0.7) { kill(v, b.owner); hit = true; break; }
+      const sg = v.seg;
+      for (let k = 0; k < v.len; k++) {
+        const dx = sg[k * 3] - b.x, dz = sg[k * 3 + 1] - b.z, rr = sg[k * 3 + 2] + 0.7;
+        if (dx * dx + dz * dz < rr * rr) { chop(v, k, b.owner); hit = true; break; }
+      }
+      if (hit) break;
+    }
+    if (hit) { scene.remove(b.m); bolts.splice(i, 1); continue; }
+    b.m.position.set(b.x, heightAt(b.x, b.z) + 1.1, b.z); b.m.rotation.y = b.heading;
+  }
+}
 function randomSpawn() {
   for (let i = 0; i < 30; i++) {
     const [x, z] = randomXZ(10, R * 0.8);
@@ -768,6 +843,7 @@ function eatFood(s, i) {
   const f = foods[i]; scene.remove(f.g); foods.splice(i, 1);
   s.len = Math.min(MAX_SEG, s.len + 1);
   if (f.type === 'unicorn') { s.setUnicorn(true); if (s.isPlayer) { score += 3; music.sparkle(); } }
+  if (f.type === 'blaster') { s.arm(); if (s.isPlayer) { score += 2; music.powerup(); } }
   if (s.isPlayer) score += 1;
   if (foods.length < FOOD_COUNT) spawnFood();
 }
@@ -807,7 +883,9 @@ function readInput(s) {
   if (keys.has('ArrowRight') || keys.has('d')) r = true;
   s.boost = (l && r) || keys.has(' ') || keys.has('Shift') || keys.has('ArrowUp');
   s.turn = (l && r) ? 0 : (l ? 1 : 0) - (r ? 1 : 0);
+  s.firing = fireHeld || keys.has('f') || keys.has('Enter');
 }
+let fireHeld = false;
 
 // ---------------- camera ----------------
 const camLook = new THREE.Vector3(), camPos = new THREE.Vector3();
@@ -833,7 +911,7 @@ function disposeScene() {
 function startGame() {
   disposeScene();
   seed = Math.random() * 1000;
-  foods = []; snakes = []; score = 0; time = 0;
+  foods = []; snakes = []; bolts = []; score = 0; time = 0; fireHeld = false;
   buildWorld();
   player = new Snake(true, 0x3fb950);
   player.spawn(0, 0, Math.random() * TAU);
@@ -849,7 +927,7 @@ function startGame() {
   music.unlock(); if (!NO_MUSIC) { music.init(); music.resume(); music.play(WORLD_TRACK[world]); }
 }
 function gameOver() {
-  state = 'over';
+  state = 'over'; fireBtn.classList.add('hidden');
   document.getElementById('finalScore').textContent = `Score ${score} · Length ${player.len}`;
   over.classList.remove('hidden');
 }
@@ -862,6 +940,8 @@ function step(dt) {
     if (s.isPlayer) readInput(s); else s.think(dt);
     s.update(dt);
   }
+  if (player.alive && player.firing) player.shoot();
+  updateBolts(dt);
   resolveCollisions();
   updateFoods(dt);
   updateCamera(dt, false);
@@ -871,6 +951,8 @@ function step(dt) {
   if (waterMesh) { waterMesh.material.map.offset.x += dt * 0.012; waterMesh.material.map.offset.y += dt * 0.007; }
   if (music.track) music.play(player.uniT > 0 ? TRACK_MAGIC : WORLD_TRACK[world]);
   scoreEl.textContent = score; lenEl.textContent = player.len;
+  const armed = player.alive && player.armT > 0;
+  fireBtn.classList.toggle('hidden', !armed); if (armed) fireTEl.textContent = Math.ceil(player.armT);
   aliveEl.textContent = snakes.filter(s => s.alive && !s.isPlayer).length;
 }
 
@@ -1038,6 +1120,23 @@ const music = {
       this.osc('triangle', f, t + k * step, t + k * step + 0.5, ag);
     }
   },
+  pew() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, o = this.ctx.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(900, t); o.frequency.exponentialRampToValueAtTime(180, t + 0.14);
+    const g = this.env(t, 0.003, 0.08, 0.1, 0.0001, 0.1, 0.05); o.connect(g); o.start(t); o.stop(t + 0.2);
+  },
+  zap() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, src = this.ctx.createBufferSource(); src.buffer = this.noise;
+    const bp = this.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 2;
+    const g = this.env(t, 0.003, 0.12, 0.15, 0.0001, 0.15, 0.05); src.connect(bp); bp.connect(g); src.start(t); src.stop(t + 0.25);
+  },
+  powerup() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    [60, 64, 67, 72].forEach((n, i) => { const o = this.osc('square', this.freq(n), t + i * 0.07, t + i * 0.07 + 0.12, this.env(t + i * 0.07, 0.005, 0.07, 0.08, 0.0001, 0.08, 0.03)); });
+  },
   sparkle() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
@@ -1049,6 +1148,9 @@ const music = {
 const menu = document.getElementById('menu'), over = document.getElementById('over'), hud = document.getElementById('hud');
 const scoreEl = document.getElementById('score'), lenEl = document.getElementById('len'), aliveEl = document.getElementById('alive');
 const muteBtn = document.getElementById('mute'), musicChk = document.getElementById('musicOn');
+const fireBtn = document.getElementById('fire'), fireTEl = document.getElementById('fireT');
+fireBtn.addEventListener('pointerdown', e => { e.preventDefault(); fireHeld = true; music.resume(); });
+window.addEventListener('pointerup', () => { fireHeld = false; }); window.addEventListener('pointercancel', () => { fireHeld = false; });
 muteBtn.addEventListener('click', () => { music.setEnabled(!music.enabled); if (music.enabled) { music.unlock(); music.resume(); } });
 musicChk.addEventListener('change', () => music.setEnabled(musicChk.checked));
 document.addEventListener('visibilitychange', () => { if (music.ctx) { if (document.hidden) music.ctx.suspend(); else if (state !== 'menu') { music.resume(); music.unlock(); } } });
@@ -1060,7 +1162,7 @@ const cpuIn = document.getElementById('cpu');
 cpuIn.addEventListener('input', () => { cpuCount = +cpuIn.value; document.getElementById('cpuVal').textContent = cpuIn.value; });
 document.getElementById('play').addEventListener('click', startGame);
 document.getElementById('again').addEventListener('click', startGame);
-document.getElementById('toMenu').addEventListener('click', () => { over.classList.add('hidden'); hud.classList.add('hidden'); muteBtn.classList.add('hidden'); menu.classList.remove('hidden'); state = 'menu'; music.stop(); });
+document.getElementById('toMenu').addEventListener('click', () => { over.classList.add('hidden'); hud.classList.add('hidden'); muteBtn.classList.add('hidden'); fireBtn.classList.add('hidden'); menu.classList.remove('hidden'); state = 'menu'; music.stop(); });
 
 const NO_MUSIC = new URLSearchParams(location.search).has('nomusic');
 
@@ -1097,6 +1199,7 @@ animate();
     if (q.get('at') === 'pool' && pools.length) { const p = pools[0]; player.spawn(p.x, p.z + p.r + 14, Math.PI); updateCamera(0, true); }
     if (q.get('unicorn')) player.setUnicorn(true);
     if (q.get('burn')) player.ignite();
+    if (q.get('gun')) { player.arm(); player.shoot(); }
   }
 }
 
