@@ -752,7 +752,23 @@ function updateFoods(dt) {
 }
 
 // ---------------- snakes ----------------
-const segGeo = new THREE.SphereGeometry(1, 12, 10);
+// continuous tube body: rings of RSEG vertices every RING_STEP along the trail, rebuilt each frame
+const RING_STEP = SEG_SPACING / 2, RSEG = 14, MAX_RINGS = MAX_SEG * 2 + 1;
+const RING_COS = [], RING_SIN = [];
+for (let v = 0; v < RSEG; v++) { RING_COS.push(Math.cos(v * TAU / RSEG)); RING_SIN.push(Math.sin(v * TAU / RSEG)); }
+const SUIT_C = new THREE.Color(0xf4f4f8), tmpC2 = new THREE.Color();
+function makeTubeGeometry() {
+  const g = new THREE.BufferGeometry(), n = MAX_RINGS * RSEG;
+  for (const name of ['position', 'normal', 'color']) g.setAttribute(name, new THREE.BufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage));
+  const idx = new Uint32Array((MAX_RINGS - 1) * RSEG * 6);
+  let p = 0;
+  for (let j = 0; j < MAX_RINGS - 1; j++) for (let i = 0; i < RSEG; i++) {
+    const a = j * RSEG + i, b = j * RSEG + (i + 1) % RSEG, c = a + RSEG, d = b + RSEG;
+    idx[p++] = a; idx[p++] = c; idx[p++] = b; idx[p++] = b; idx[p++] = c; idx[p++] = d;
+  }
+  g.setIndex(new THREE.BufferAttribute(idx, 1)); g.setDrawRange(0, 0);
+  return g;
+}
 function buildHead(color) {
   const g = new THREE.Group();
   g.add(new THREE.Mesh(new THREE.SphereGeometry(HEAD_R, 16, 14), lam(color)));
@@ -778,12 +794,11 @@ class Snake {
     this.turn = 0; this.boost = false;
     this.seg = new Float32Array(MAX_SEG * 3);
     this.alive = false; this.respawnT = 0; this.len = START_LEN;
-    this.body = new THREE.InstancedMesh(segGeo, lam(0xffffff), MAX_SEG);
+    this.geo = makeTubeGeometry();
+    this.body = new THREE.Mesh(this.geo, lam(0xffffff, { vertexColors: true }));
     this.body.frustumCulled = false;
-    const c2 = this.color.clone().multiplyScalar(0.7);
-    for (let i = 0; i < MAX_SEG; i++) this.body.setColorAt(i, (i % 4 < 2) ? this.color : c2);
-    this.body.instanceColor.needsUpdate = true;
-    this.body.count = 0;
+    this.ringC = new Float32Array(MAX_RINGS * 4);
+    this.cDark = this.color.clone().multiplyScalar(0.6);
     this.head = buildHead(this.color); this.head.visible = false;
     this.headMat = this.head.children[0].material;
     this.uniHead = buildHead(0xffffff); addUnicornBits(this.uniHead); this.uniHead.visible = false;
@@ -817,18 +832,14 @@ class Snake {
     this.placeSegments(); this.placeHead();
   }
   die() {
-    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.gun.visible = false; this.armT = 0; this.body.count = 0; this.setBurning(false); this.uniT = 0;
+    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.gun.visible = false; this.armT = 0; this.geo.setDrawRange(0, 0); this.setBurning(false); this.uniT = 0;
   }
   setUnicorn(on) {
     this.uniT = on ? UNICORN_TIME : 0;
     this.uniHead.visible = on && this.alive; this.head.visible = !on && this.alive;
     if (!on) this.restoreStripes();
   }
-  restoreStripes() {
-    const c2 = this.color.clone().multiplyScalar(0.7), suit = new THREE.Color(0xf4f4f8);
-    for (let i = 0; i < MAX_SEG; i++) this.body.setColorAt(i, world === 'space' ? (i % 4 === 3 ? this.color : suit) : (i % 4 < 2) ? this.color : c2);
-    this.body.instanceColor.needsUpdate = true;
-  }
+  restoreStripes() { /* colours are rebuilt every frame in placeSegments */ }
   arm() { this.armT = BLASTER_TIME; this.fireCd = 0; }
   shoot() {
     if (!this.alive || this.armT <= 0 || this.fireCd > 0) return;
@@ -845,9 +856,7 @@ class Snake {
   updateUnicorn(dt) {
     if (this.uniT <= 0) return;
     this.uniT -= dt;
-    if (this.uniT <= 0) { this.setUnicorn(false); return; }
-    for (let i = 0; i < this.len; i++) this.body.setColorAt(i, tmpC.setHSL((i * 0.045 - time * 0.4) % 1 + 1, 0.95, 0.55));
-    this.body.instanceColor.needsUpdate = true;
+    if (this.uniT <= 0) this.setUnicorn(false);
   }
   setBurning(on) {
     this.fire.visible = on;
@@ -959,10 +968,11 @@ class Snake {
     if (this.gun.visible) { this.gun.position.copy(h.position); this.gun.position.y += HEAD_R + 0.25; this.gun.rotation.copy(h.rotation); }
   }
   placeSegments() {
-    const t = this.trail, m = tmpM;
+    const t = this.trail, L = this.len * SEG_SPACING, rings = this.len * 2 + 1, c = this.ringC;
     let idx = 0, acc = 0;
-    for (let k = 1; k <= this.len; k++) {
-      const target = k * SEG_SPACING;
+    // 1. ring centres sampled by arc length along the trail; every 2nd ring is a collision segment
+    for (let j = 0; j < rings; j++) {
+      const target = j * RING_STEP;
       while (idx < t.length - 1) {
         const a = t[idx], b = t[idx + 1], sd = Math.hypot(b.x - a.x, b.z - a.z);
         if (acc + sd >= target) break;
@@ -975,12 +985,41 @@ class Snake {
         const f = sd > 0 ? (target - acc) / sd : 0;
         px = a.x + (b.x - a.x) * f; pz = a.z + (b.z - a.z) * f; py = a.y + (b.y - a.y) * f;
       }
-      const s = SEG_R * (0.5 + 0.5 * (1 - (k - 1) / Math.max(this.len, 8)));
-      m.makeScale(s, s, s); m.setPosition(px, py + s * 0.92, pz);
-      this.body.setMatrixAt(k - 1, m);
-      this.seg[(k - 1) * 3] = px; this.seg[(k - 1) * 3 + 1] = pz; this.seg[(k - 1) * 3 + 2] = s; this.segY[k - 1] = py;
+      const k = target / SEG_SPACING;
+      let s = Math.min(HEAD_R * 0.85, SEG_R * (0.5 + 0.5 * (1 - (k - 1) / Math.max(this.len, 8))));
+      const tail = L - target;
+      if (tail < 3) s *= Math.sqrt(Math.max(0, 1 - ((3 - tail) / 3) ** 2));
+      c[j * 4] = px; c[j * 4 + 1] = py + s * 0.92; c[j * 4 + 2] = pz; c[j * 4 + 3] = s;
+      if (j > 0 && j % 2 === 0) { const q = j / 2 - 1; this.seg[q * 3] = px; this.seg[q * 3 + 1] = pz; this.seg[q * 3 + 2] = s; this.segY[q] = py; }
     }
-    this.body.count = this.len; this.body.instanceMatrix.needsUpdate = true;
+    // 2. tube vertices: a frame per ring (tangent toward the head, side from world up), striped colours, lighter belly
+    const pos = this.geo.attributes.position.array, nrm = this.geo.attributes.normal.array, col = this.geo.attributes.color.array;
+    const rainbow = this.uniT > 0, space = world === 'space';
+    let tx = Math.sin(this.heading), ty = 0, tz = Math.cos(this.heading);
+    for (let j = 0; j < rings; j++) {
+      const a = Math.max(j - 1, 0) * 4, b = Math.min(j + 1, rings - 1) * 4;
+      const dx = c[a] - c[b], dy = c[a + 1] - c[b + 1], dz = c[a + 2] - c[b + 2], dl = Math.hypot(dx, dy, dz);
+      if (dl > 1e-4) { tx = dx / dl; ty = dy / dl; tz = dz / dl; }
+      let sx = tz, sz = -tx; const sl = Math.hypot(sx, sz);
+      if (sl < 1e-4) { sx = 1; sz = 0; } else { sx /= sl; sz /= sl; }
+      const nx = ty * sz, ny = tz * sx - tx * sz, nz = -ty * sx;
+      const i = j >> 1;
+      if (rainbow) tmpC.setHSL(((i * 0.045 - time * 0.4) % 1 + 1) % 1, 0.95, 0.55);
+      else tmpC.copy(space ? (i % 4 === 3 ? this.color : SUIT_C) : (i % 4 < 2 ? this.color : this.cDark));
+      tmpC2.copy(tmpC).lerp(SUIT_C, 0.45);
+      const cx = c[j * 4], cy = c[j * 4 + 1], cz = c[j * 4 + 2], r = c[j * 4 + 3];
+      for (let v = 0; v < RSEG; v++) {
+        const ca = RING_COS[v], sa = RING_SIN[v];
+        const ox = sx * ca + nx * sa, oy = ny * sa, oz = sz * ca + nz * sa;
+        const o = (j * RSEG + v) * 3;
+        pos[o] = cx + ox * r; pos[o + 1] = cy + oy * r; pos[o + 2] = cz + oz * r;
+        nrm[o] = ox; nrm[o + 1] = oy; nrm[o + 2] = oz;
+        const belly = oy < 0 ? -oy : 0;
+        col[o] = tmpC.r + (tmpC2.r - tmpC.r) * belly; col[o + 1] = tmpC.g + (tmpC2.g - tmpC.g) * belly; col[o + 2] = tmpC.b + (tmpC2.b - tmpC.b) * belly;
+      }
+    }
+    this.geo.setDrawRange(0, (rings - 1) * RSEG * 6);
+    for (const name of ['position', 'normal', 'color']) this.geo.attributes[name].needsUpdate = true;
   }
 }
 const tmpM = new THREE.Matrix4();
