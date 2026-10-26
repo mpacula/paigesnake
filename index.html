@@ -60,6 +60,7 @@
     <div class="card" data-world="beach"><span class="emoji">🏖️</span>Beach</div>
     <div class="card" data-world="space"><span class="emoji">🚀</span>Space</div>
     <div class="card" data-world="candy"><span class="emoji">🍭</span>Candy</div>
+    <div class="card" data-world="race"><span class="emoji">🏎️</span>Race</div>
   </div>
   <div class="row"><label for="cpu">Other snakes</label><input id="cpu" type="range" min="0" max="10" value="4"><b id="cpuVal">4</b></div>
   <div class="row"><label><input id="musicOn" type="checkbox" checked> Music</label></div>
@@ -90,7 +91,9 @@ const WORLDS = {
   beach:  { sky: 0x7ec8ff, fog: 0xd2ebff, fogNear: 90, fogFar: 270, hemiSky: 0xdff2ff, hemiGround: 0xc9b57a },
   space:  { sky: 0x05030f, fog: 0x0b0718, fogNear: 60, fogFar: 210, hemiSky: 0x5a4fa0, hemiGround: 0x1a1424 },
   candy:  { sky: 0xffd6ec, fog: 0xffe4f1, fogNear: 80, fogFar: 260, hemiSky: 0xfff0f8, hemiGround: 0xffb0d0 },
+  race:   { sky: 0x8fd0ff, fog: 0xc8e6f8, fogNear: 80, fogFar: 250, hemiSky: 0xdff2ff, hemiGround: 0x4a8a3a },
 };
+const GRAVITY = 28;
 const CPU_COLORS = [0xff8c42, 0x9b5de5, 0x3a86ff, 0xff5d8f, 0x2ec4b6, 0xffd166, 0xef476f, 0x8d6e63, 0x06d6a0, 0xf4a261];
 
 // ---------------- state ----------------
@@ -98,7 +101,7 @@ let world = 'forest', cpuCount = 4, seed = 0;
 let scene, camera, renderer, clock;
 let snakes = [], foods = [], player = null;
 let state = 'menu', score = 0, time = 0;
-let waterMesh = null, cloudMesh = null, pools = [], craters = [], ufos = [];
+let waterMesh = null, cloudMesh = null, pools = [], craters = [], ufos = [], ramps = [];
 
 // ---------------- noise / terrain ----------------
 function hash(ix, iz) {
@@ -120,8 +123,14 @@ function fbm(x, z) { // -0.5 .. 0.5
   for (let i = 0; i < 4; i++) { v += vnoise(x * f, z * f) * amp; sum += amp; amp *= 0.5; f *= 2.1; }
   return v / sum - 0.5;
 }
-function heightAt(x, z) {
+function heightAt(x, z) { const t = terrainAt(x, z); return ramps.length ? t + rampHeight(x, z) : t; }
+function terrainAt(x, z) {
   const r = Math.hypot(x, z);
+  if (world === 'race') {
+    let h = fbm(x * 0.02 + seed, z * 0.02 + seed) * 2.2;
+    if (r > R) { const t = (r - R) / 40; h += t * t * 45; }
+    return h;
+  }
   if (world === 'forest') {
     let h = fbm(x * 0.022 + seed, z * 0.022 + seed) * 7;
     if (r > R) { const t = (r - R) / 40; h += t * t * 45; }
@@ -151,6 +160,10 @@ function groundColor(x, z, h, c) {
     c.setRGB(0.32, 0.58, 0.19).lerp(tmpC.setRGB(0.17, 0.40, 0.12), n);
     if (h > 10) c.lerp(tmpC.setRGB(0.45, 0.42, 0.38), Math.min(1, (h - 10) / 14));
     if (h > 26) c.lerp(tmpC.setRGB(0.95, 0.96, 1.0), Math.min(1, (h - 26) / 8));
+  } else if (world === 'race') {
+    const stripe = Math.sin(x * 0.45) > 0 ? 0.06 : 0;
+    c.setRGB(0.36 + stripe, 0.62 + stripe, 0.24 + stripe).lerp(tmpC.setRGB(0.28, 0.5, 0.2), n * 0.5);
+    if (h > 10) c.lerp(tmpC.setRGB(0.45, 0.42, 0.38), Math.min(1, (h - 10) / 14));
   } else if (world === 'candy') {
     const n2 = fbm(x * 0.05 + 21, z * 0.05 + 9) + 0.5;
     c.setRGB(0.99, 0.78, 0.88).lerp(tmpC.setRGB(0.78, 0.96, 0.88), n);
@@ -201,6 +214,7 @@ const lavaTex = makeTex(128, (x, y, s) => {
   return [255, 50 + t * 170, t * t * 60];
 }, 3);
 const lavaMat = new THREE.MeshBasicMaterial({ map: lavaTex });
+const checkTex = makeTex(64, (x, y) => (((x >> 4) + (y >> 4)) % 2) ? [255, 255, 255] : [25, 25, 25], 1);
 const caneTex = makeTex(64, (x, y) => ((x + y) % 16 < 8) ? [235, 40, 70] : [255, 255, 255], 1);
 const fireMats = [new THREE.MeshBasicMaterial({ color: 0xff6a00 }), new THREE.MeshBasicMaterial({ color: 0xffd23a }), new THREE.MeshBasicMaterial({ color: 0xff2e00 })];
 const fireGeo = new THREE.ConeGeometry(0.45, 1.5, 5);
@@ -223,7 +237,7 @@ const GEO = {
   dodec: new THREE.DodecahedronGeometry(1, 0), sphere: new THREE.SphereGeometry(1, 10, 8),
   box: new THREE.BoxGeometry(1, 1, 1), tuft: new THREE.ConeGeometry(1, 1, 4),
   frond: frondGeo, palmTrunk: palmTrunkGeo, octa: new THREE.OctahedronGeometry(1, 0),
-  arc: new THREE.TorusGeometry(0.7, 0.22, 8, 14, Math.PI),
+  arc: new THREE.TorusGeometry(0.7, 0.22, 8, 14, Math.PI), tire: new THREE.TorusGeometry(0.8, 0.35, 8, 16),
 };
 const lam = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 const MAT = {
@@ -242,6 +256,9 @@ const MAT = {
   cane: lam(0xffffff, { map: caneTex }), wrap: lam(0xff8fb8), frost: lam(0xfff0f5), cherry: lam(0xd1001c),
   wafer: lam(0xd9a066), scoop0: lam(0xffb3d1), scoop1: lam(0xb8f0d0), scoop2: lam(0x6b3a14), rockCandy: lam(0xcfa8ff, { flatShading: true }),
   cotton: lam(0xffc2dd),
+  track: lam(0xff6a00, { side: THREE.DoubleSide }), trackSide: lam(0xc94a00, { side: THREE.DoubleSide }), rail: lam(0x1f5fff, { side: THREE.DoubleSide }),
+  pillar: lam(0x7a7f88), coneOr: lam(0xff7a1a), tire: lam(0x222222), stand: lam(0x9aa0a8), standSeat: lam(0xe04040),
+  board0: lam(0xffd23f), board1: lam(0x3a86ff), board2: lam(0xff3f7f), checker: lam(0xffffff, { map: checkTex }),
   lolli0: lam(0xff3f7f), lolli1: lam(0x3fc1ff), lolli2: lam(0xffd23f), lolli3: lam(0x9b5de5), lolli4: lam(0x2ec4b6),
   gum0: lam(0xff6fa8, { flatShading: true }), gum1: lam(0x7ee8a0, { flatShading: true }), gum2: lam(0xffe066, { flatShading: true }), gum3: lam(0x9fb8ff, { flatShading: true }),
   helmet: new THREE.MeshPhongMaterial({ color: 0xa8dcff, transparent: true, opacity: 0.3, shininess: 140, specular: 0xffffff, depthWrite: false }),
@@ -371,6 +388,26 @@ const PROTO = {
     part(g, 'sphere', 'scoop' + Math.floor(Math.random() * 3), 0, 3.1, 0, 0.6, 0.6, 0.6);
   },
   candyRock(g) { part(g, 'dodec', 'rockCandy', 0, 0.25, 0, 1.2, 0.7, 1.0, rnd(0, 0.6), 0, rnd(0, 0.6)); },
+  cone(g) {
+    part(g, 'box', 'gunGrip', 0, 0.05, 0, 0.9, 0.1, 0.9);
+    part(g, 'cone', 'coneOr', 0, 0.6, 0, 0.45, 1.2, 0.45);
+    part(g, 'cyl', 'pole', 0, 0.55, 0, 0.3, 0.14, 0.3);
+  },
+  tireStack(g) { const n = 2 + Math.floor(Math.random() * 2); for (let i = 0; i < n; i++) part(g, 'tire', 'tire', rnd(-0.1, 0.1), 0.35 + i * 0.7, rnd(-0.1, 0.1), 1, 1, 1, Math.PI / 2, rnd(0, 1), 0); },
+  flagCheck(g) {
+    part(g, 'cyl', 'pole', 0, 1.6, 0, 0.06, 3.2, 0.06);
+    part(g, 'box', 'checker', 0.75, 2.75, 0, 1.5, 0.9, 0.05);
+  },
+  grandstand(g) {
+    for (let i = 0; i < 4; i++) { part(g, 'box', 'stand', 0, 0.5 + i, -i * 1.3, 12, 1 + i * 0.0, 1.3); part(g, 'box', 'standSeat', 0, 1.1 + i, -i * 1.3 - 0.3, 11.5, 0.2, 0.6); }
+    part(g, 'box', 'stand', 0, 5.6, -2.5, 13, 0.3, 6.5);
+    for (const sx of [-5.8, 5.8]) part(g, 'cyl', 'pillar', sx, 2.8, -5.5, 0.2, 5.6, 0.2);
+  },
+  billboard(g, i) {
+    for (const sx of [-1.6, 1.6]) part(g, 'cyl', 'pillar', sx, 1.5, 0, 0.12, 3, 0.12);
+    part(g, 'box', 'board' + (i % 3), 0, 4.0, 0, 4.4, 2.2, 0.15);
+    part(g, 'box', 'checker', 0, 4.0, 0.1, 4.0, 0.5, 0.05);
+  },
   cloud(g, m = 'cloud') {
     const n = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) part(g, 'sphere', m, rnd(-1.2, 1.2) * i, rnd(-0.1, 0.2), rnd(-0.6, 0.6), rnd(0.8, 1.4), rnd(0.4, 0.6), rnd(0.8, 1.2));
@@ -380,9 +417,90 @@ function scatter(name, count, rmin, rmax, smin, smax, filter, arg) {
   for (let i = 0; i < count; i++) {
     const [x, z] = randomXZ(rmin, rmax);
     if (filter && !filter(x, z, heightAt(x, z))) { i--; continue; }
-    if (inPool(x, z, 1.5)) { i--; continue; }
+    if (inPool(x, z, 1.5) || onRamp(x, z)) { i--; continue; }
     const g = placeGroup(x, z, rnd(smin, smax));
     PROTO[name](g, arg); collect(g);
+  }
+}
+
+// ---------------- ramps (race world) ----------------
+const RAMP_W = 6, RAMP_FLANK = 3;
+function rampLocal(r, x, z) { const dx = x - r.x, dz = z - r.z; return [(dx * r.hx + dz * r.hz) / r.len, -dx * r.hz + dz * r.hx]; }
+function rampProfile(r, t) {
+  switch (r.type) {
+    case 'jump': return t < 0 ? 0 : t <= 1 ? t * t : t < 1.12 ? 1 - (t - 1) / 0.12 : 0;
+    case 'land': return t > 1 ? 0 : t >= 0 ? (1 - t) * (1 - t) : t > -0.12 ? 1 + t / 0.12 : 0;
+    case 'bump': return t < 0 || t > 1 ? 0 : Math.sin(Math.PI * t);
+    default: return t < 0 || t > 1 ? 0 : Math.min(1, Math.min(t, 1 - t) / 0.08);
+  }
+}
+function rampHeight(x, z) {
+  let e = 0;
+  for (const r of ramps) {
+    const [t, u] = rampLocal(r, x, z);
+    if (t < -0.15 || t > 1.15) continue;
+    const au = Math.abs(u); if (au > RAMP_W / 2 + RAMP_FLANK) continue;
+    const edge = au <= RAMP_W / 2 ? 1 : 1 - (au - RAMP_W / 2) / RAMP_FLANK;
+    e = Math.max(e, rampProfile(r, t) * r.H * edge);
+  }
+  return e;
+}
+function onRamp(x, z) { return ramps.length > 0 && rampHeight(x, z) > 0.05; }
+function stripMesh(a, b, mat) {
+  const n = a.length, pos = new Float32Array(n * 6), idx = [];
+  for (let i = 0; i < n; i++) { pos.set([a[i].x, a[i].y, a[i].z], i * 6); pos.set([b[i].x, b[i].y, b[i].z], i * 6 + 3); }
+  for (let i = 0; i < n - 1; i++) { const k = i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  return new THREE.Mesh(g, mat);
+}
+function addRampPiece(x, z, heading, len, H, type) {
+  const r = { x, z, hx: Math.sin(heading), hz: Math.cos(heading), len, H, type, heading };
+  ramps.push(r); return r;
+}
+function buildRampMeshes() {
+  const pillars = new THREE.Group();
+  for (const r of ramps) {
+    const N = 44, rows = { fl: [], l: [], rr: [], fr: [], lt: [], rt: [] };
+    const pt = (t, u, dy) => { const x = r.x + r.hx * t * r.len - r.hz * u, z = r.z + r.hz * t * r.len + r.hx * u; return new THREE.Vector3(x, heightAt(x, z) + 0.08 + dy, z); };
+    for (let i = 0; i <= N; i++) {
+      const t = -0.15 + 1.3 * i / N;
+      rows.fl.push(pt(t, -RAMP_W / 2 - RAMP_FLANK, -0.08)); rows.l.push(pt(t, -RAMP_W / 2, 0)); rows.rr.push(pt(t, RAMP_W / 2, 0)); rows.fr.push(pt(t, RAMP_W / 2 + RAMP_FLANK, -0.08));
+      rows.lt.push(pt(t, -RAMP_W / 2, 0.5)); rows.rt.push(pt(t, RAMP_W / 2, 0.5));
+      if (i % 4 === 2 && t > 0 && t < 1) {
+        const c = pt(t, 0, 0), ground = terrainAt(c.x, c.z), h = c.y - ground;
+        if (h > 1.2) for (const u of [-2, 2]) { const q = pt(t, u, 0); part(pillars, 'cyl', 'pillar', q.x, ground + h / 2 - 0.3, q.z, 0.22, h - 0.4, 0.22); }
+      }
+      if (i % 6 === 0 && t > 0 && t < 1) { const c = pt(t, 0, 0.1); part(pillars, 'box', 'rail', c.x, c.y, c.z, RAMP_W, 0.12, 0.5, 0, r.heading, 0); }
+    }
+    scene.add(stripMesh(rows.fl, rows.l, MAT.trackSide), stripMesh(rows.l, rows.rr, MAT.track), stripMesh(rows.rr, rows.fr, MAT.trackSide),
+      stripMesh(rows.l, rows.lt, MAT.rail), stripMesh(rows.rr, rows.rt, MAT.rail));
+    if (r.type === 'flat') {
+      const c = pt(0.5, 0, 0), loop = new THREE.Mesh(new THREE.TorusGeometry(6.5, 0.7, 10, 36), MAT.track);
+      loop.position.set(c.x, c.y + 6.5, c.z); loop.rotation.y = r.heading - Math.PI / 2; scene.add(loop);
+      const loopRail = new THREE.Mesh(new THREE.TorusGeometry(6.5, 0.25, 8, 36), MAT.rail);
+      loopRail.position.copy(loop.position); loopRail.rotation.copy(loop.rotation); loopRail.scale.setScalar(1.08); scene.add(loopRail);
+    }
+  }
+  collect(pillars);
+}
+function buildRamps() {
+  ramps = [];
+  const sets = [['jumpset', 22, 7, 9], ['jumpset', 26, 10, 12], ['bump', 26, 5, 0], ['bump', 22, 4, 0], ['flat', 24, 0.4, 0]];
+  const centers = [];
+  for (const [kind, len, H, gap] of sets) {
+    let x, z, ok = false, heading = Math.random() * TAU;
+    for (let i = 0; i < 40 && !ok; i++) {
+      [x, z] = randomXZ(0, R * 0.7);
+      ok = centers.every(c => Math.hypot(c[0] - x, c[1] - z) > 48) && Math.hypot(x, z) + len + gap < R * 0.95;
+    }
+    if (!ok) continue;
+    centers.push([x, z]);
+    const hx = Math.sin(heading), hz = Math.cos(heading);
+    if (kind === 'jumpset') {
+      const total = len + gap + len * 0.8, sx = x - hx * total / 2, sz = z - hz * total / 2;
+      addRampPiece(sx, sz, heading, len, H, 'jump');
+      addRampPiece(sx + hx * (len + gap), sz + hz * (len + gap), heading, len * 0.8, H, 'land');
+    } else addRampPiece(x - hx * len / 2, z - hz * len / 2, heading, len, H, kind);
   }
 }
 
@@ -398,7 +516,8 @@ function buildPools() {
     let x, z, ok = false;
     for (let t = 0; t < 40 && !ok; t++) {
       [x, z] = randomXZ(30, R * 0.8);
-      ok = ((world !== 'beach' && world !== 'candy') || heightAt(x, z) > 1.3) && pools.every(p => Math.hypot(p.x - x, p.z - z) > 45);
+      ok = ((world !== 'beach' && world !== 'candy') || heightAt(x, z) > 1.3) && pools.every(p => Math.hypot(p.x - x, p.z - z) > 45)
+        && ramps.every(rp => Math.hypot(rp.x + rp.hx * rp.len / 2 - x, rp.z + rp.hz * rp.len / 2 - z) > 32);
     }
     if (!ok) continue;
     const r = rnd(6, 9);
@@ -473,7 +592,7 @@ function buildWorld() {
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position, colors = new Float32Array(pos.count * 3), c = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), z = pos.getZ(i), h = heightAt(x, z);
+    const x = pos.getX(i), z = pos.getZ(i), h = terrainAt(x, z);
     pos.setY(i, h); groundColor(x, z, h, c);
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
   }
@@ -490,6 +609,7 @@ function buildWorld() {
     waterMesh.position.y = 0; scene.add(waterMesh);
   }
 
+  if (world === 'race') { buildRamps(); buildRampMeshes(); }
   buildPools();
 
   // objects
@@ -513,6 +633,18 @@ function buildWorld() {
       const [x, z] = randomXZ(20, R * 0.85);
       const gg = placeGroup(x, z, 1); PROTO.umbrella(gg, i % 3); collect(gg);
     }
+  } else if (world === 'race') {
+    scatter('cone', 70, 0, R, 0.9, 1.3);
+    scatter('tireStack', 40, 0, R + 5, 0.8, 1.2);
+    scatter('flagCheck', 24, 0, R, 0.9, 1.3);
+    scatter('roundTree', 30, R * 0.85, R + 25, 0.9, 1.4);
+    scatter('bush', 40, 0, R + 10, 0.8, 1.4);
+    scatter('tuft', 150, 0, R, 0.9, 1.5);
+    for (let i = 0; i < 3; i++) {
+      const a = i * TAU / 3 + rnd(-0.3, 0.3), rr = R * 0.93, x = Math.sin(a) * rr, z = Math.cos(a) * rr;
+      const gg = placeGroup(x, z, 1); gg.rotation.y = a; PROTO.grandstand(gg); collect(gg);
+    }
+    for (let i = 0; i < 6; i++) { const [x, z] = randomXZ(R * 0.5, R * 0.9); const gg = placeGroup(x, z, rnd(0.9, 1.2)); PROTO.billboard(gg, i); collect(gg); }
   } else if (world === 'candy') {
     const dry = (x, z, h) => h > 1.2;
     scatter('lollipop', 55, 8, R * 0.95, 1.0, 2.6, dry);
@@ -670,13 +802,15 @@ class Snake {
     this.burnT = 0; this.shrinkT = 0;
     scene.add(this.body, this.head, this.uniHead, this.fire, this.helmet, this.gun);
     this.wobble = Math.random() * 100; this.thinkT = 0; this.target = null;
-    this.x = 0; this.z = 0; this.heading = 0; this.trail = []; this.trailLen = 0;
+    this.x = 0; this.z = 0; this.y = 0; this.vy = 0; this.climb = 0; this.air = false; this.heading = 0; this.trail = []; this.trailLen = 0;
+    this.segY = new Float32Array(MAX_SEG);
+    for (const o of [this.head, this.uniHead, this.helmet, this.gun]) o.rotation.order = 'YXZ';
   }
   spawn(x, z, heading) {
     this.x = x; this.z = z; this.heading = heading; this.len = START_LEN; this.alive = true;
-    this.trail = []; this.trailLen = 0;
+    this.trail = []; this.trailLen = 0; this.y = heightAt(x, z); this.vy = 0; this.climb = 0; this.air = false;
     const n = START_LEN + 3;
-    for (let i = 0; i <= n; i++) this.trail.push({ x: x - Math.sin(heading) * i * SEG_SPACING, z: z - Math.cos(heading) * i * SEG_SPACING });
+    for (let i = 0; i <= n; i++) { const px = x - Math.sin(heading) * i * SEG_SPACING, pz = z - Math.cos(heading) * i * SEG_SPACING; this.trail.push({ x: px, z: pz, y: heightAt(px, pz) }); }
     this.trailLen = n * SEG_SPACING;
     this.head.visible = true; this.target = null; this.thinkT = 0;
     this.setBurning(false); this.setUnicorn(false); this.armT = 0; this.gun.visible = false;
@@ -733,10 +867,10 @@ class Snake {
     const flick = Math.min(1, this.burnT / 0.6);
     this.fire.children.forEach((f, i) => {
       const k = i % 5;
-      let px, pz, s;
-      if (k === 0) { px = this.x; pz = this.z; s = HEAD_R; }
-      else { px = this.seg[(k - 1) * 3]; pz = this.seg[(k - 1) * 3 + 1]; s = this.seg[(k - 1) * 3 + 2]; }
-      f.position.set(px + rnd(-0.6, 0.6), heightAt(px, pz) + s * 1.6 + rnd(0, 0.6), pz + rnd(-0.6, 0.6));
+      let px, pz, py, s;
+      if (k === 0) { px = this.x; pz = this.z; py = this.y; s = HEAD_R; }
+      else { px = this.seg[(k - 1) * 3]; pz = this.seg[(k - 1) * 3 + 1]; py = this.segY[k - 1]; s = this.seg[(k - 1) * 3 + 2]; }
+      f.position.set(px + rnd(-0.6, 0.6), py + s * 1.6 + rnd(0, 0.6), pz + rnd(-0.6, 0.6));
       const sc = rnd(0.6, 1.3) * flick; f.scale.set(sc, sc * rnd(0.8, 1.6), sc);
       f.rotation.set(rnd(-0.3, 0.3), rnd(0, TAU), rnd(-0.3, 0.3));
     });
@@ -794,7 +928,17 @@ class Snake {
     if (r > R) { nx *= R / r; nz *= R / r; }
     const d = Math.hypot(nx - this.x, nz - this.z);
     this.x = nx; this.z = nz;
-    if (d > 0) { this.trail.unshift({ x: nx, z: nz }); this.trailLen += d; }
+    // vertical motion: follow the ground, but launch when it falls away (ramp kickers, ledges)
+    const g = heightAt(nx, nz);
+    if (!this.air) {
+      if (g < this.y - 0.3 && d > 0) { this.air = true; this.vy = clamp(this.climb, 0, 16); }
+      else { this.climb = (g - this.y) / Math.max(dt, 1e-4); this.y = g; }
+    }
+    if (this.air) {
+      this.vy -= GRAVITY * dt; this.y += this.vy * dt;
+      if (this.y <= g) { this.y = g; this.air = false; this.vy = 0; this.climb = 0; }
+    }
+    if (d > 0) { this.trail.unshift({ x: nx, z: nz, y: this.y }); this.trailLen += d; }
     const need = (this.len + 1) * SEG_SPACING + 2;
     while (this.trailLen > need && this.trail.length > 2) {
       const a = this.trail[this.trail.length - 1], b = this.trail[this.trail.length - 2];
@@ -806,8 +950,9 @@ class Snake {
   }
   placeHead() {
     const h = this.uniT > 0 ? this.uniHead : this.head;
-    h.position.set(this.x, heightAt(this.x, this.z) + HEAD_R * 0.95, this.z);
-    h.rotation.set(0, this.heading, this.turn * 0.25);
+    h.position.set(this.x, this.y + HEAD_R * 0.95, this.z);
+    const pitch = this.air ? clamp(-Math.atan2(this.vy, this.speed), -0.7, 0.7) : clamp(-Math.atan2(this.climb, this.speed) * 0.8, -0.6, 0.6);
+    h.rotation.set(pitch, this.heading, this.turn * 0.25);
     this.helmet.visible = world === 'space' && this.alive;
     if (this.helmet.visible) { this.helmet.position.copy(h.position); this.helmet.rotation.copy(h.rotation); }
     this.gun.visible = this.armT > 0 && this.alive;
@@ -823,17 +968,17 @@ class Snake {
         if (acc + sd >= target) break;
         acc += sd; idx++;
       }
-      let px, pz;
-      if (idx >= t.length - 1) { px = t[t.length - 1].x; pz = t[t.length - 1].z; }
+      let px, pz, py;
+      if (idx >= t.length - 1) { const e = t[t.length - 1]; px = e.x; pz = e.z; py = e.y; }
       else {
         const a = t[idx], b = t[idx + 1], sd = Math.hypot(b.x - a.x, b.z - a.z);
         const f = sd > 0 ? (target - acc) / sd : 0;
-        px = a.x + (b.x - a.x) * f; pz = a.z + (b.z - a.z) * f;
+        px = a.x + (b.x - a.x) * f; pz = a.z + (b.z - a.z) * f; py = a.y + (b.y - a.y) * f;
       }
       const s = SEG_R * (0.5 + 0.5 * (1 - (k - 1) / Math.max(this.len, 8)));
-      m.makeScale(s, s, s); m.setPosition(px, heightAt(px, pz) + s * 0.92, pz);
+      m.makeScale(s, s, s); m.setPosition(px, py + s * 0.92, pz);
       this.body.setMatrixAt(k - 1, m);
-      this.seg[(k - 1) * 3] = px; this.seg[(k - 1) * 3 + 1] = pz; this.seg[(k - 1) * 3 + 2] = s;
+      this.seg[(k - 1) * 3] = px; this.seg[(k - 1) * 3 + 1] = pz; this.seg[(k - 1) * 3 + 2] = s; this.segY[k - 1] = py;
     }
     this.body.count = this.len; this.body.instanceMatrix.needsUpdate = true;
   }
@@ -936,7 +1081,7 @@ const camLook = new THREE.Vector3(), camPos = new THREE.Vector3();
 function updateCamera(dt, snap) {
   if (!player) return;
   const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
-  const hy = heightAt(player.x, player.z);
+  const hy = player.y;
   camPos.set(player.x - fx * 17, hy + 12, player.z - fz * 17);
   camPos.y = Math.max(camPos.y, heightAt(camPos.x, camPos.z) + 2.5);
   camLook.set(player.x + fx * 4, hy + 1, player.z + fz * 4);
@@ -1037,7 +1182,16 @@ const CANDY_BASS = [], CANDY_CH = [];
 for (const r of CANDY_ROOTS) { CANDY_BASS.push([r, 1], [r + 7, 1], [r, 1], [r + 7, 1]); CANDY_CH.push([[r + 12, r + 16, r + 19], 4]); }
 CANDY_CH[5][0] = [45, 48, 52]; CANDY_CH[9 + 4][0] = [48, 52, 55];
 const TRACK_CANDY = { bpm: 132, lead: CANDY_LEAD, bass: CANDY_BASS, chords: CANDY_CH, style: 'candy' };
-const WORLD_TRACK = { forest: TRACK_NORMAL, beach: TRACK_NORMAL, space: TRACK_SPACE, candy: TRACK_CANDY };
+// Race: an original driving riff in A minor.
+const RACE_LEAD = [
+  [69,.5],[69,.5],[72,.5],[74,.5],[76,1],[74,.5],[72,.5],[69,.5],[69,.5],[72,.5],[74,.5],[72,1],[null,1],
+  [67,.5],[67,.5],[71,.5],[72,.5],[74,1],[72,.5],[71,.5],[69,.5],[72,.5],[76,.5],[79,.5],[76,1],[null,1],
+  [77,.5],[77,.5],[76,.5],[74,.5],[72,1],[74,.5],[76,.5],[77,.5],[79,.5],[81,.5],[79,.5],[76,1],[74,1],
+  [72,.5],[74,.5],[76,.5],[77,.5],[79,1],[76,.5],[74,.5],[72,1],[69,1],[null,2]];
+const RACE_BASS = [];
+for (const r of [33, 33, 31, 33, 29, 29, 36, 31]) RACE_BASS.push([r,.5],[r,.5],[r,.5],[r,.5],[r,.5],[r,.5],[r+12,.5],[r,.5]);
+const TRACK_RACE = { bpm: 150, lead: RACE_LEAD, bass: RACE_BASS, style: 'race' };
+const WORLD_TRACK = { forest: TRACK_NORMAL, beach: TRACK_NORMAL, space: TRACK_SPACE, candy: TRACK_CANDY, race: TRACK_RACE };
 
 // iOS mutes Web Audio under the ring/silent switch unless an <audio> element is playing.
 // Looping a silent clip (started inside the user's tap) switches the session to playback mode.
@@ -1086,7 +1240,7 @@ const music = {
     this.voices = [voice(track.lead, (n, t, dur) => this.lead(n, t, dur))];
     if (track.bass) this.voices.push(voice(track.bass, (n, t, dur) => this.bass(n, t, dur)));
     if (track.chords) this.voices.push(voice(track.chords, (ch, t, dur) => this.chord(ch, t, dur)));
-    if (track.style === 'chip' || track.style === 'candy') this.voices.push(voice([[1, .5]], (n, t) => this.hat(t)));
+    if (track.style === 'chip' || track.style === 'candy' || track.style === 'race') this.voices.push(voice([[1, .5]], (n, t) => this.hat(t)));
   },
   stop() { this.track = null; this.voices = []; },
   tick() {
@@ -1125,6 +1279,10 @@ const music = {
       const g = this.env(t, 0.01, 0.13, 0.08, 0.07, dur * 0.85, 0.05);
       const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200; lp.connect(g);
       this.osc('square', f, t, t + dur + 0.1, lp);
+    } else if (this.track.style === 'race') {
+      const g = this.env(t, 0.01, 0.07, 0.1, 0.05, dur * 0.85, 0.06);
+      const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1700; lp.connect(g);
+      this.osc('sawtooth', f, t, t + dur + 0.1, lp, -8); this.osc('sawtooth', f, t, t + dur + 0.1, lp, 8);
     } else if (this.track.style === 'candy') {
       // toy piano: bright sine with a quick square bite, short decay
       this.osc('sine', f, t, t + 0.5, this.env(t, 0.004, 0.14, 0.3, 0.0001, 0.3, 0.05));
@@ -1143,6 +1301,12 @@ const music = {
     this.osc('triangle', f * 2, t, t + 1.1, g3);
   },
   bass(n, t, dur) {
+    if (this.track.style === 'race') {
+      const g = this.env(t, 0.005, 0.1, 0.08, 0.06, dur * 0.7, 0.03);
+      const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; lp.connect(g);
+      this.osc('square', this.freq(n), t, t + dur + 0.1, lp);
+      return;
+    }
     if (this.track.style === 'space') {
       this.osc('sine', this.freq(n), t, t + dur + 0.1, this.env(t, 0.01, 0.16, 0.15, 0.02, dur * 0.6, 0.05));
       this.osc('triangle', this.freq(n), t, t + dur + 0.1, this.env(t, 0.01, 0.05, 0.1, 0.01, dur * 0.5, 0.05));
@@ -1262,6 +1426,7 @@ animate();
     if (q.get('cpu') !== null) cpuCount = clamp(+q.get('cpu') || 0, 0, 10);
     startGame();
     if (q.get('at') === 'pool' && pools.length) { const p = pools[0]; player.spawn(p.x, p.z + p.r + 14, Math.PI); updateCamera(0, true); }
+    if (q.get('at') === 'ramp' && ramps.length) { const rp = ramps[0]; player.spawn(rp.x - rp.hx * 12, rp.z - rp.hz * 12, rp.heading); updateCamera(0, true); }
     if (q.get('unicorn')) player.setUnicorn(true);
     if (q.get('burn')) player.ignite();
     if (q.get('gun')) { player.arm(); player.shoot(); }
