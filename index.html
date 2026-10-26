@@ -81,17 +81,17 @@
 import * as THREE from './vendor/three.module.min.js';
 
 // ---------------- config ----------------
-const R = 95;                // playable radius
-const TERRAIN_SIZE = 360;
+const R = 190;               // playable radius
+const TERRAIN_SIZE = 720;
 const SEG_SPACING = 1.0, SEG_R = 0.95, HEAD_R = 1.2, MAX_SEG = 400, START_LEN = 6;
-const FOOD_COUNT = 45;
+const FOOD_COUNT = 160;
 const PLAYER_SPEED = 14, CPU_SPEED = 11.5, TURN_RATE = 2.6;
 const WORLDS = {
-  forest: { sky: 0x9fd3ff, fog: 0xb4dcf5, fogNear: 70, fogFar: 240, hemiSky: 0xcfe8ff, hemiGround: 0x3f6b2a },
-  beach:  { sky: 0x7ec8ff, fog: 0xd2ebff, fogNear: 90, fogFar: 270, hemiSky: 0xdff2ff, hemiGround: 0xc9b57a },
-  space:  { sky: 0x05030f, fog: 0x0b0718, fogNear: 60, fogFar: 210, hemiSky: 0x5a4fa0, hemiGround: 0x1a1424 },
-  candy:  { sky: 0xffd6ec, fog: 0xffe4f1, fogNear: 80, fogFar: 260, hemiSky: 0xfff0f8, hemiGround: 0xffb0d0 },
-  race:   { sky: 0x8fd0ff, fog: 0xc8e6f8, fogNear: 80, fogFar: 250, hemiSky: 0xdff2ff, hemiGround: 0x4a8a3a },
+  forest: { sky: 0x9fd3ff, fog: 0xb4dcf5, fogNear: 90, fogFar: 300, hemiSky: 0xcfe8ff, hemiGround: 0x3f6b2a },
+  beach:  { sky: 0x7ec8ff, fog: 0xd2ebff, fogNear: 110, fogFar: 330, hemiSky: 0xdff2ff, hemiGround: 0xc9b57a },
+  space:  { sky: 0x05030f, fog: 0x0b0718, fogNear: 80, fogFar: 260, hemiSky: 0x5a4fa0, hemiGround: 0x1a1424 },
+  candy:  { sky: 0xffd6ec, fog: 0xffe4f1, fogNear: 100, fogFar: 320, hemiSky: 0xfff0f8, hemiGround: 0xffb0d0 },
+  race:   { sky: 0x8fd0ff, fog: 0xc8e6f8, fogNear: 100, fogFar: 310, hemiSky: 0xdff2ff, hemiGround: 0x4a8a3a },
 };
 const GRAVITY = 28;
 const CPU_COLORS = [0xff8c42, 0x9b5de5, 0x3a86ff, 0xff5d8f, 0x2ec4b6, 0xffd166, 0xef476f, 0x8d6e63, 0x06d6a0, 0xf4a261];
@@ -485,7 +485,7 @@ function buildRampMeshes() {
 }
 function buildRamps() {
   ramps = [];
-  const sets = [['jumpset', 22, 7, 9], ['jumpset', 26, 10, 12], ['bump', 26, 5, 0], ['bump', 22, 4, 0], ['flat', 24, 0.4, 0]];
+  const sets = [['jumpset', 22, 7, 9], ['jumpset', 26, 10, 12], ['jumpset', 24, 8, 10], ['jumpset', 28, 11, 13], ['bump', 26, 5, 0], ['bump', 22, 4, 0], ['bump', 24, 4.5, 0], ['bump', 26, 5.5, 0], ['flat', 24, 0.4, 0], ['flat', 26, 0.4, 0]];
   const centers = [];
   for (const [kind, len, H, gap] of sets) {
     let x, z, ok = false, heading = Math.random() * TAU;
@@ -511,12 +511,12 @@ function inPool(x, z, margin = 0) {
 }
 function buildPools() {
   pools = [];
-  const n = 1 + Math.floor(Math.random() * 2);
+  const n = 2 + Math.floor(Math.random() * 3);
   for (let i = 0; i < n; i++) {
     let x, z, ok = false;
     for (let t = 0; t < 40 && !ok; t++) {
       [x, z] = randomXZ(30, R * 0.8);
-      ok = ((world !== 'beach' && world !== 'candy') || heightAt(x, z) > 1.3) && pools.every(p => Math.hypot(p.x - x, p.z - z) > 45)
+      ok = ((world !== 'beach' && world !== 'candy') || heightAt(x, z) > 1.3) && pools.every(p => Math.hypot(p.x - x, p.z - z) > 70)
         && ramps.every(rp => Math.hypot(rp.x + rp.hx * rp.len / 2 - x, rp.z + rp.hz * rp.len / 2 - z) > 32);
     }
     if (!ok) continue;
@@ -558,7 +558,7 @@ function buildWorld() {
   const W = WORLDS[world];
   const space = world === 'space';
   craters = []; ufos = [];
-  if (space) for (let i = 0; i < 7; i++) { const [x, z] = randomXZ(0, R + 20); craters.push({ x, z, r: rnd(8, 18), depth: rnd(2.5, 5.5) }); }
+  if (space) for (let i = 0; i < 24; i++) { const [x, z] = randomXZ(0, R + 20); craters.push({ x, z, r: rnd(8, 18), depth: rnd(2.5, 5.5) }); }
   scene = new THREE.Scene();
   scene.background = new THREE.Color(W.sky);
   scene.fog = new THREE.Fog(W.fog, W.fogNear, W.fogFar);
@@ -566,20 +566,20 @@ function buildWorld() {
   const sun = new THREE.DirectionalLight(space ? 0xdfe8ff : 0xfff3d6, space ? 1.5 : 1.6); sun.position.set(60, 100, 40); scene.add(sun);
   scene.add(new THREE.AmbientLight(0xffffff, space ? 0.12 : 0.25));
   if (space) {
-    const n = 1600, pts = new Float32Array(n * 3);
+    const n = 2400, pts = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
-      const u = Math.random() * TAU, v = Math.acos(rnd(0.02, 1)), rr = 480;
+      const u = Math.random() * TAU, v = Math.acos(rnd(0.02, 1)), rr = 950;
       pts[i * 3] = Math.sin(v) * Math.cos(u) * rr; pts[i * 3 + 1] = Math.cos(v) * rr; pts[i * 3 + 2] = Math.sin(v) * Math.sin(u) * rr;
     }
     const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(pts, 3));
     scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, fog: false })));
-    const planet = new THREE.Mesh(new THREE.SphereGeometry(55, 32, 24), new THREE.MeshLambertMaterial({ color: 0xf0a060, fog: false }));
-    planet.position.set(-220, 130, -300); scene.add(planet);
-    const ring = new THREE.Mesh(new THREE.RingGeometry(70, 110, 64), new THREE.MeshBasicMaterial({ color: 0xd8c8a8, side: THREE.DoubleSide, transparent: true, opacity: 0.55, fog: false }));
+    const planet = new THREE.Mesh(new THREE.SphereGeometry(110, 32, 24), new THREE.MeshLambertMaterial({ color: 0xf0a060, fog: false }));
+    planet.position.set(-440, 260, -600); scene.add(planet);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(140, 220, 64), new THREE.MeshBasicMaterial({ color: 0xd8c8a8, side: THREE.DoubleSide, transparent: true, opacity: 0.55, fog: false }));
     ring.position.copy(planet.position); ring.rotation.set(1.25, 0.3, 0.2); scene.add(ring);
-    const moon = new THREE.Mesh(new THREE.SphereGeometry(14, 20, 16), new THREE.MeshLambertMaterial({ color: 0xc8c8d8, fog: false }));
-    moon.position.set(260, 170, -120); scene.add(moon);
-    for (let i = 0; i < 3; i++) {
+    const moon = new THREE.Mesh(new THREE.SphereGeometry(28, 20, 16), new THREE.MeshLambertMaterial({ color: 0xc8c8d8, fog: false }));
+    moon.position.set(520, 340, -240); scene.add(moon);
+    for (let i = 0; i < 7; i++) {
       const [x, z] = randomXZ(15, R * 0.8), u = makeUfo();
       u.userData = { cx: x, cz: z, phase: Math.random() * TAU, baseY: heightAt(x, z) + rnd(7, 10) };
       scene.add(u); ufos.push(u);
@@ -587,7 +587,7 @@ function buildWorld() {
   }
 
   // terrain
-  const N = 170;
+  const N = 300;
   const g = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, N, N);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position, colors = new Float32Array(pos.count * 3), c = new THREE.Color();
@@ -603,7 +603,7 @@ function buildWorld() {
   waterMesh = null;
   if (world === 'beach' || world === 'candy') {
     const choc = world === 'candy';
-    const wg = new THREE.PlaneGeometry(900, 900); wg.rotateX(-Math.PI / 2);
+    const wg = new THREE.PlaneGeometry(1800, 1800); wg.rotateX(-Math.PI / 2);
     waterMesh = new THREE.Mesh(wg, new THREE.MeshPhongMaterial({
       color: choc ? 0x6b3a14 : 0x2aa0d8, map: waterTex, transparent: true, opacity: choc ? 0.97 : 0.8, shininess: choc ? 140 : 90, specular: choc ? 0xffd9b0 : 0x9fd8ff }));
     waterMesh.position.y = 0; scene.add(waterMesh);
@@ -614,54 +614,54 @@ function buildWorld() {
 
   // objects
   if (world === 'forest') {
-    scatter('pine', 60, 8, R + 5, 0.9, 1.6);
-    scatter('pine', 55, R + 5, R + 45, 0.8, 1.3);
-    scatter('roundTree', 28, 8, R, 0.9, 1.4);
-    scatter('bush', 120, 0, R + 10, 0.8, 1.6);
-    scatter('rock', 45, 0, R + 30, 0.6, 2.0);
-    scatter('tuft', 260, 0, R + 5, 0.9, 1.5);
-    scatter('mushroom', 45, 0, R, 0.8, 1.4);
+    scatter('pine', 240, 8, R + 5, 0.9, 1.6);
+    scatter('pine', 220, R + 5, R + 45, 0.8, 1.3);
+    scatter('roundTree', 112, 8, R, 0.9, 1.4);
+    scatter('bush', 480, 0, R + 10, 0.8, 1.6);
+    scatter('rock', 180, 0, R + 30, 0.6, 2.0);
+    scatter('tuft', 1040, 0, R + 5, 0.9, 1.5);
+    scatter('mushroom', 180, 0, R, 0.8, 1.4);
   } else if (world === 'beach') {
     const dry = (x, z, h) => h > 1.1;
-    scatter('palm', 30, 10, R * 0.95, 0.9, 1.4, dry);
-    scatter('bush', 50, 0, R * 0.9, 0.8, 1.5, dry, 'bushBeach');
-    scatter('tuft', 170, 0, R, 0.9, 1.6, dry, 'grassBeach');
-    scatter('rock', 35, R * 0.8, R + 12, 0.6, 1.8, (x, z, h) => h > -0.3);
-    scatter('shell', 70, 0, R + 4, 0.8, 1.6, (x, z, h) => h > 0.2);
-    scatter('starfish', 16, R * 0.6, R + 4, 0.8, 1.3, (x, z, h) => h > 0.2);
-    for (let i = 0; i < 6; i++) {
+    scatter('palm', 120, 10, R * 0.95, 0.9, 1.4, dry);
+    scatter('bush', 200, 0, R * 0.9, 0.8, 1.5, dry, 'bushBeach');
+    scatter('tuft', 680, 0, R, 0.9, 1.6, dry, 'grassBeach');
+    scatter('rock', 140, R * 0.8, R + 12, 0.6, 1.8, (x, z, h) => h > -0.3);
+    scatter('shell', 280, 0, R + 4, 0.8, 1.6, (x, z, h) => h > 0.2);
+    scatter('starfish', 64, R * 0.6, R + 4, 0.8, 1.3, (x, z, h) => h > 0.2);
+    for (let i = 0; i < 20; i++) {
       const [x, z] = randomXZ(20, R * 0.85);
       const gg = placeGroup(x, z, 1); PROTO.umbrella(gg, i % 3); collect(gg);
     }
   } else if (world === 'race') {
-    scatter('cone', 70, 0, R, 0.9, 1.3);
-    scatter('tireStack', 40, 0, R + 5, 0.8, 1.2);
-    scatter('flagCheck', 24, 0, R, 0.9, 1.3);
-    scatter('roundTree', 30, R * 0.85, R + 25, 0.9, 1.4);
-    scatter('bush', 40, 0, R + 10, 0.8, 1.4);
-    scatter('tuft', 150, 0, R, 0.9, 1.5);
-    for (let i = 0; i < 3; i++) {
-      const a = i * TAU / 3 + rnd(-0.3, 0.3), rr = R * 0.93, x = Math.sin(a) * rr, z = Math.cos(a) * rr;
+    scatter('cone', 280, 0, R, 0.9, 1.3);
+    scatter('tireStack', 160, 0, R + 5, 0.8, 1.2);
+    scatter('flagCheck', 96, 0, R, 0.9, 1.3);
+    scatter('roundTree', 120, R * 0.85, R + 25, 0.9, 1.4);
+    scatter('bush', 160, 0, R + 10, 0.8, 1.4);
+    scatter('tuft', 600, 0, R, 0.9, 1.5);
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6 + rnd(-0.2, 0.2), rr = R * 0.93, x = Math.sin(a) * rr, z = Math.cos(a) * rr;
       const gg = placeGroup(x, z, 1); gg.rotation.y = a; PROTO.grandstand(gg); collect(gg);
     }
-    for (let i = 0; i < 6; i++) { const [x, z] = randomXZ(R * 0.5, R * 0.9); const gg = placeGroup(x, z, rnd(0.9, 1.2)); PROTO.billboard(gg, i); collect(gg); }
+    for (let i = 0; i < 14; i++) { const [x, z] = randomXZ(R * 0.35, R * 0.9); const gg = placeGroup(x, z, rnd(0.9, 1.2)); PROTO.billboard(gg, i); collect(gg); }
   } else if (world === 'candy') {
     const dry = (x, z, h) => h > 1.2;
-    scatter('lollipop', 55, 8, R * 0.95, 1.0, 2.6, dry);
-    scatter('candyCane', 40, 5, R * 0.95, 0.9, 1.8, dry);
-    scatter('gumdrop', 130, 0, R, 0.8, 1.6, dry);
-    scatter('cupcake', 25, 10, R * 0.9, 0.9, 1.5, dry);
-    scatter('iceCream', 20, 10, R * 0.9, 0.9, 1.4, dry);
-    scatter('candyRock', 40, R * 0.7, R + 10, 0.6, 1.6, (x, z, h) => h > 0.2);
+    scatter('lollipop', 220, 8, R * 0.95, 1.0, 2.6, dry);
+    scatter('candyCane', 160, 5, R * 0.95, 0.9, 1.8, dry);
+    scatter('gumdrop', 520, 0, R, 0.8, 1.6, dry);
+    scatter('cupcake', 100, 10, R * 0.9, 0.9, 1.5, dry);
+    scatter('iceCream', 80, 10, R * 0.9, 0.9, 1.4, dry);
+    scatter('candyRock', 160, R * 0.7, R + 10, 0.6, 1.6, (x, z, h) => h > 0.2);
   } else {
-    scatter('crystal', 70, 0, R + 15, 0.8, 1.7);
-    scatter('moonRock', 110, 0, R + 35, 0.6, 2.2);
-    scatter('alienPlant', 90, 0, R, 0.8, 1.5);
-    scatter('rocket', 2, 25, R * 0.8, 0.9, 1.2);
-    scatter('flag', 3, 15, R * 0.8, 1, 1);
+    scatter('crystal', 280, 0, R + 15, 0.8, 1.7);
+    scatter('moonRock', 440, 0, R + 35, 0.6, 2.2);
+    scatter('alienPlant', 360, 0, R, 0.8, 1.5);
+    scatter('rocket', 8, 25, R * 0.8, 0.9, 1.2);
+    scatter('flag', 12, 15, R * 0.8, 1, 1);
   }
-  if (!space) for (let i = 0; i < 16; i++) {
-    const [x, z] = randomXZ(20, 240);
+  if (!space) for (let i = 0; i < 48; i++) {
+    const [x, z] = randomXZ(20, 480);
     const gg = new THREE.Group(); gg.position.set(x, rnd(55, 80), z); gg.rotation.y = Math.random() * TAU; gg.scale.setScalar(rnd(4, 9));
     PROTO.cloud(gg, world === 'candy' ? 'cotton' : 'cloud'); collect(gg);
   }
@@ -1398,7 +1398,7 @@ const NO_MUSIC = new URLSearchParams(location.search).has('nomusic');
 // ---------------- renderer / loop ----------------
 renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.5, 600);
+camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.5, 1200);
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 clock = new THREE.Clock();
