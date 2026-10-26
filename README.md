@@ -8,7 +8,7 @@ Everything is a static site (one HTML file plus Three.js), so there is no build 
 
 ## Features
 
-- Three worlds: forest, beach and space (snakes wear space suits there), generated fresh every game
+- Four worlds: forest, beach, space (snakes wear space suits there) and candy, generated fresh every game
 - Smooth third-person movement over rolling terrain
 - Configurable number of CPU snakes (0 to 10)
 - Eat snacks (apples, bananas, popsicles) to grow
@@ -20,7 +20,7 @@ Everything is a static site (one HTML file plus Three.js), so there is no build 
   CPU snakes can pick it up too
 - Music: synthesized in the browser with Web Audio, no audio files. Normal play
   is a chiptune "Ode to Joy" (Beethoven); space opens with the fanfare from Strauss's
-  "Also sprach Zarathustra" and settles into an ambient synth loop; unicorn mode
+  "Also sprach Zarathustra" and settles into an ambient synth loop; candy has an original bouncy toy-piano tune; unicorn mode
   switches to a bell-and-harp "Twinkle, Twinkle, Little Star". The tunes are public domain and the
   arrangements are original, so there is nothing to license. Toggle with the
   speaker button or the Music checkbox in the menu
@@ -40,6 +40,6 @@ Serve the folder over HTTP (ES modules don't load from `file://`):
 python3 -m http.server 8000
 ```
 
-`index.html?play=forest&cpu=4` (or `play=beach`, `play=space`) skips the menu, which is handy while iterating.
+`index.html?play=forest&cpu=4` (or `play=beach`, `play=space`, `play=candy`) skips the menu, which is handy while iterating.
 Add `&at=pool` to start next to a lava pool, `&burn=1` to start on fire, `&unicorn=1` to start in unicorn mode, `&gun=1` to start armed, `&nomusic=1` to skip audio.
 Bump `CACHE` in `sw.js` when you want to force clients to refetch assets.

@@ -59,6 +59,7 @@
     <div class="card sel" data-world="forest"><span class="emoji">🌲</span>Forest</div>
     <div class="card" data-world="beach"><span class="emoji">🏖️</span>Beach</div>
     <div class="card" data-world="space"><span class="emoji">🚀</span>Space</div>
+    <div class="card" data-world="candy"><span class="emoji">🍭</span>Candy</div>
   </div>
   <div class="row"><label for="cpu">Other snakes</label><input id="cpu" type="range" min="0" max="10" value="4"><b id="cpuVal">4</b></div>
   <div class="row"><label><input id="musicOn" type="checkbox" checked> Music</label></div>
@@ -88,6 +89,7 @@ const WORLDS = {
   forest: { sky: 0x9fd3ff, fog: 0xb4dcf5, fogNear: 70, fogFar: 240, hemiSky: 0xcfe8ff, hemiGround: 0x3f6b2a },
   beach:  { sky: 0x7ec8ff, fog: 0xd2ebff, fogNear: 90, fogFar: 270, hemiSky: 0xdff2ff, hemiGround: 0xc9b57a },
   space:  { sky: 0x05030f, fog: 0x0b0718, fogNear: 60, fogFar: 210, hemiSky: 0x5a4fa0, hemiGround: 0x1a1424 },
+  candy:  { sky: 0xffd6ec, fog: 0xffe4f1, fogNear: 80, fogFar: 260, hemiSky: 0xfff0f8, hemiGround: 0xffb0d0 },
 };
 const CPU_COLORS = [0xff8c42, 0x9b5de5, 0x3a86ff, 0xff5d8f, 0x2ec4b6, 0xffd166, 0xef476f, 0x8d6e63, 0x06d6a0, 0xf4a261];
 
@@ -137,7 +139,7 @@ function heightAt(x, z) {
     if (r > R) { const t = (r - R) / 35; h += t * t * 40; }
     return h;
   }
-  let h = 2.2 + fbm(x * 0.02 + seed, z * 0.02 + seed) * 3;
+  let h = world === 'candy' ? 2.6 + fbm(x * 0.025 + seed, z * 0.025 + seed) * 5 : 2.2 + fbm(x * 0.02 + seed, z * 0.02 + seed) * 3;
   const r0 = R * 0.92;
   if (r > r0) { const t = (r - r0) / 18; h -= Math.pow(t, 1.4) * 7; }
   return h;
@@ -149,6 +151,11 @@ function groundColor(x, z, h, c) {
     c.setRGB(0.32, 0.58, 0.19).lerp(tmpC.setRGB(0.17, 0.40, 0.12), n);
     if (h > 10) c.lerp(tmpC.setRGB(0.45, 0.42, 0.38), Math.min(1, (h - 10) / 14));
     if (h > 26) c.lerp(tmpC.setRGB(0.95, 0.96, 1.0), Math.min(1, (h - 26) / 8));
+  } else if (world === 'candy') {
+    const n2 = fbm(x * 0.05 + 21, z * 0.05 + 9) + 0.5;
+    c.setRGB(0.99, 0.78, 0.88).lerp(tmpC.setRGB(0.78, 0.96, 0.88), n);
+    c.lerp(tmpC.setRGB(0.86, 0.80, 0.98), n2 * 0.6);
+    if (h < 1.0) c.lerp(tmpC.setRGB(0.45, 0.25, 0.12), Math.min(1, (1.0 - h) / 1.2));
   } else if (world === 'space') {
     c.setRGB(0.60, 0.57, 0.68).lerp(tmpC.setRGB(0.38, 0.34, 0.48), n);
     if (h < -1) c.lerp(tmpC.setRGB(0.20, 0.17, 0.28), Math.min(1, (-1 - h) / 5));
@@ -194,6 +201,7 @@ const lavaTex = makeTex(128, (x, y, s) => {
   return [255, 50 + t * 170, t * t * 60];
 }, 3);
 const lavaMat = new THREE.MeshBasicMaterial({ map: lavaTex });
+const caneTex = makeTex(64, (x, y) => ((x + y) % 16 < 8) ? [235, 40, 70] : [255, 255, 255], 1);
 const fireMats = [new THREE.MeshBasicMaterial({ color: 0xff6a00 }), new THREE.MeshBasicMaterial({ color: 0xffd23a }), new THREE.MeshBasicMaterial({ color: 0xff2e00 })];
 const fireGeo = new THREE.ConeGeometry(0.45, 1.5, 5);
 
@@ -215,6 +223,7 @@ const GEO = {
   dodec: new THREE.DodecahedronGeometry(1, 0), sphere: new THREE.SphereGeometry(1, 10, 8),
   box: new THREE.BoxGeometry(1, 1, 1), tuft: new THREE.ConeGeometry(1, 1, 4),
   frond: frondGeo, palmTrunk: palmTrunkGeo, octa: new THREE.OctahedronGeometry(1, 0),
+  arc: new THREE.TorusGeometry(0.7, 0.22, 8, 14, Math.PI),
 };
 const lam = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 const MAT = {
@@ -230,6 +239,11 @@ const MAT = {
   stalk: lam(0x8fd0ff), bulb: lam(0xa8ff6a, { emissive: 0x5fd622 }),
   ufo: lam(0xb8bcc8, { flatShading: true }), dome: lam(0x9fd8ff, { emissive: 0x2a6fb0, transparent: true, opacity: 0.75 }),
   ufoLight: lam(0xffd34a, { emissive: 0xffaa00 }), rocketBody: lam(0xf0f0f0), rocketNose: lam(0xff4d4d), flagPole: lam(0xdddddd), flag: lam(0x3a86ff),
+  cane: lam(0xffffff, { map: caneTex }), wrap: lam(0xff8fb8), frost: lam(0xfff0f5), cherry: lam(0xd1001c),
+  wafer: lam(0xd9a066), scoop0: lam(0xffb3d1), scoop1: lam(0xb8f0d0), scoop2: lam(0x6b3a14), rockCandy: lam(0xcfa8ff, { flatShading: true }),
+  cotton: lam(0xffc2dd),
+  lolli0: lam(0xff3f7f), lolli1: lam(0x3fc1ff), lolli2: lam(0xffd23f), lolli3: lam(0x9b5de5), lolli4: lam(0x2ec4b6),
+  gum0: lam(0xff6fa8, { flatShading: true }), gum1: lam(0x7ee8a0, { flatShading: true }), gum2: lam(0xffe066, { flatShading: true }), gum3: lam(0x9fb8ff, { flatShading: true }),
   helmet: new THREE.MeshPhongMaterial({ color: 0xa8dcff, transparent: true, opacity: 0.3, shininess: 140, specular: 0xffffff, depthWrite: false }),
   suit: lam(0xf4f4f8), pack: lam(0xc9ccd6),
 };
@@ -336,9 +350,30 @@ const PROTO = {
     part(g, 'cyl', 'flagPole', 0, 1.5, 0, 0.05, 3, 0.05);
     part(g, 'box', 'flag', 0.6, 2.6, 0, 1.2, 0.7, 0.05);
   },
-  cloud(g) {
+  lollipop(g) {
+    part(g, 'cyl', 'pole', 0, 1.6, 0, 0.12, 3.2, 0.12);
+    part(g, 'sphere', 'lolli' + Math.floor(Math.random() * 5), 0, 3.6, 0, 1.2, 1.2, 0.35);
+    part(g, 'sphere', 'frost', 0, 3.6, 0, 0.45, 0.45, 0.4);
+  },
+  candyCane(g) {
+    part(g, 'cyl', 'cane', 0, 1.5, 0, 0.22, 3.0, 0.22);
+    part(g, 'arc', 'cane', 0.7, 3.0, 0, 1, 1, 1);
+  },
+  gumdrop(g) { part(g, 'ico', 'gum' + Math.floor(Math.random() * 4), 0, 0.5, 0, 0.8, 0.7, 0.8); },
+  cupcake(g) {
+    part(g, 'cyl', 'wrap', 0, 0.5, 0, 0.8, 1.0, 0.8);
+    part(g, 'sphere', 'frost', 0, 1.3, 0, 0.85, 0.7, 0.85);
+    part(g, 'sphere', 'cherry', 0, 1.95, 0, 0.22, 0.22, 0.22);
+  },
+  iceCream(g) {
+    part(g, 'cone', 'wafer', 0, 1.0, 0, 0.6, 2.0, 0.6, Math.PI, 0, 0);
+    part(g, 'sphere', 'scoop' + Math.floor(Math.random() * 3), 0, 2.2, 0, 0.7, 0.7, 0.7);
+    part(g, 'sphere', 'scoop' + Math.floor(Math.random() * 3), 0, 3.1, 0, 0.6, 0.6, 0.6);
+  },
+  candyRock(g) { part(g, 'dodec', 'rockCandy', 0, 0.25, 0, 1.2, 0.7, 1.0, rnd(0, 0.6), 0, rnd(0, 0.6)); },
+  cloud(g, m = 'cloud') {
     const n = 3 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < n; i++) part(g, 'sphere', 'cloud', rnd(-1.2, 1.2) * i, rnd(-0.1, 0.2), rnd(-0.6, 0.6), rnd(0.8, 1.4), rnd(0.4, 0.6), rnd(0.8, 1.2));
+    for (let i = 0; i < n; i++) part(g, 'sphere', m, rnd(-1.2, 1.2) * i, rnd(-0.1, 0.2), rnd(-0.6, 0.6), rnd(0.8, 1.4), rnd(0.4, 0.6), rnd(0.8, 1.2));
   },
 };
 function scatter(name, count, rmin, rmax, smin, smax, filter, arg) {
@@ -363,7 +398,7 @@ function buildPools() {
     let x, z, ok = false;
     for (let t = 0; t < 40 && !ok; t++) {
       [x, z] = randomXZ(30, R * 0.8);
-      ok = (world !== 'beach' || heightAt(x, z) > 1.3) && pools.every(p => Math.hypot(p.x - x, p.z - z) > 45);
+      ok = ((world !== 'beach' && world !== 'candy') || heightAt(x, z) > 1.3) && pools.every(p => Math.hypot(p.x - x, p.z - z) > 45);
     }
     if (!ok) continue;
     const r = rnd(6, 9);
@@ -447,10 +482,11 @@ function buildWorld() {
   scene.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ map: groundTex, vertexColors: true })));
 
   waterMesh = null;
-  if (world === 'beach') {
+  if (world === 'beach' || world === 'candy') {
+    const choc = world === 'candy';
     const wg = new THREE.PlaneGeometry(900, 900); wg.rotateX(-Math.PI / 2);
     waterMesh = new THREE.Mesh(wg, new THREE.MeshPhongMaterial({
-      color: 0x2aa0d8, map: waterTex, transparent: true, opacity: 0.8, shininess: 90, specular: 0x9fd8ff }));
+      color: choc ? 0x6b3a14 : 0x2aa0d8, map: waterTex, transparent: true, opacity: choc ? 0.97 : 0.8, shininess: choc ? 140 : 90, specular: choc ? 0xffd9b0 : 0x9fd8ff }));
     waterMesh.position.y = 0; scene.add(waterMesh);
   }
 
@@ -477,6 +513,14 @@ function buildWorld() {
       const [x, z] = randomXZ(20, R * 0.85);
       const gg = placeGroup(x, z, 1); PROTO.umbrella(gg, i % 3); collect(gg);
     }
+  } else if (world === 'candy') {
+    const dry = (x, z, h) => h > 1.2;
+    scatter('lollipop', 55, 8, R * 0.95, 1.0, 2.6, dry);
+    scatter('candyCane', 40, 5, R * 0.95, 0.9, 1.8, dry);
+    scatter('gumdrop', 130, 0, R, 0.8, 1.6, dry);
+    scatter('cupcake', 25, 10, R * 0.9, 0.9, 1.5, dry);
+    scatter('iceCream', 20, 10, R * 0.9, 0.9, 1.4, dry);
+    scatter('candyRock', 40, R * 0.7, R + 10, 0.6, 1.6, (x, z, h) => h > 0.2);
   } else {
     scatter('crystal', 70, 0, R + 15, 0.8, 1.7);
     scatter('moonRock', 110, 0, R + 35, 0.6, 2.2);
@@ -487,7 +531,7 @@ function buildWorld() {
   if (!space) for (let i = 0; i < 16; i++) {
     const [x, z] = randomXZ(20, 240);
     const gg = new THREE.Group(); gg.position.set(x, rnd(55, 80), z); gg.rotation.y = Math.random() * TAU; gg.scale.setScalar(rnd(4, 9));
-    PROTO.cloud(gg); collect(gg);
+    PROTO.cloud(gg, world === 'candy' ? 'cotton' : 'cloud'); collect(gg);
   }
   cloudMesh = flushBuckets().get('sphere|cloud') || null;
 }
@@ -556,7 +600,7 @@ function spawnFood(x, z, type) {
   if (x === undefined) {
     for (let i = 0; i < 30; i++) {
       [x, z] = randomXZ(5, R * 0.95);
-      if ((world !== 'beach' || heightAt(x, z) > 0.8) && !inPool(x, z, 2)) break;
+      if (((world !== 'beach' && world !== 'candy') || heightAt(x, z) > 0.8) && !inPool(x, z, 2)) break;
     }
   }
   if (!type && Math.random() < UNICORN_CHANCE && !foods.some(f => f.type === 'unicorn')) type = 'unicorn';
@@ -982,7 +1026,18 @@ const SP_CH = [[Am,4],[Fm,4],[Cm,4],[Gm,4],[Am,4],[Fm,4],[Cm,4],[Gm,4]];
 const SP_BASS = [];
 for (const r of [33, 29, 36, 31, 33, 29, 36, 31]) for (let k = 0; k < 8; k++) SP_BASS.push([k % 4 === 3 ? r + 7 : r, .5]);
 const TRACK_SPACE = { bpm: 100, intro: [[36,2],[43,2],[48,4],[52,1.5],[51,4]], lead: SP_LEAD, chords: SP_CH, bass: SP_BASS, style: 'space' };
-const WORLD_TRACK = { forest: TRACK_NORMAL, beach: TRACK_NORMAL, space: TRACK_SPACE };
+// Candy: an original bouncy toy-piano tune in C major.
+const CANDY_LEAD = [
+  [72,.5],[76,.5],[79,.5],[76,.5],[81,.5],[79,.5],[76,1],[74,.5],[77,.5],[81,.5],[77,.5],[79,.5],[77,.5],[74,1],
+  [76,.5],[79,.5],[84,.5],[79,.5],[81,.5],[83,.5],[84,.5],[81,.5],[79,.5],[76,.5],[74,.5],[76,.5],[72,1.5],[null,.5],
+  [72,.5],[72,.5],[76,.5],[79,.5],[81,1],[79,1],[77,.5],[77,.5],[81,.5],[84,.5],[83,1],[79,1],
+  [84,.5],[83,.5],[81,.5],[79,.5],[77,.5],[76,.5],[74,.5],[71,.5],[72,2],[null,2]];
+const CANDY_ROOTS = [36, 36, 41, 43, 36, 33, 43, 36, 36, 36, 41, 43, 36, 41, 43, 36];
+const CANDY_BASS = [], CANDY_CH = [];
+for (const r of CANDY_ROOTS) { CANDY_BASS.push([r, 1], [r + 7, 1], [r, 1], [r + 7, 1]); CANDY_CH.push([[r + 12, r + 16, r + 19], 4]); }
+CANDY_CH[5][0] = [45, 48, 52]; CANDY_CH[9 + 4][0] = [48, 52, 55];
+const TRACK_CANDY = { bpm: 132, lead: CANDY_LEAD, bass: CANDY_BASS, chords: CANDY_CH, style: 'candy' };
+const WORLD_TRACK = { forest: TRACK_NORMAL, beach: TRACK_NORMAL, space: TRACK_SPACE, candy: TRACK_CANDY };
 
 // iOS mutes Web Audio under the ring/silent switch unless an <audio> element is playing.
 // Looping a silent clip (started inside the user's tap) switches the session to playback mode.
@@ -1031,7 +1086,7 @@ const music = {
     this.voices = [voice(track.lead, (n, t, dur) => this.lead(n, t, dur))];
     if (track.bass) this.voices.push(voice(track.bass, (n, t, dur) => this.bass(n, t, dur)));
     if (track.chords) this.voices.push(voice(track.chords, (ch, t, dur) => this.chord(ch, t, dur)));
-    if (track.style === 'chip') this.voices.push(voice([[1, .5]], (n, t) => this.hat(t)));
+    if (track.style === 'chip' || track.style === 'candy') this.voices.push(voice([[1, .5]], (n, t) => this.hat(t)));
   },
   stop() { this.track = null; this.voices = []; },
   tick() {
@@ -1070,6 +1125,10 @@ const music = {
       const g = this.env(t, 0.01, 0.13, 0.08, 0.07, dur * 0.85, 0.05);
       const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200; lp.connect(g);
       this.osc('square', f, t, t + dur + 0.1, lp);
+    } else if (this.track.style === 'candy') {
+      // toy piano: bright sine with a quick square bite, short decay
+      this.osc('sine', f, t, t + 0.5, this.env(t, 0.004, 0.14, 0.3, 0.0001, 0.3, 0.05));
+      this.osc('square', f * 2, t, t + 0.2, this.env(t, 0.003, 0.025, 0.08, 0.0001, 0.08, 0.03));
     } else if (this.track.style === 'space') {
       const g = this.env(t, 0.25, 0.09, 0.3, 0.07, dur * 0.9, 0.4, this.echoIn);
       this.osc('sine', f, t, t + dur + 0.6, g); this.osc('triangle', f * 2, t, t + dur + 0.6, g, 4);
@@ -1098,6 +1157,12 @@ const music = {
     const g = this.env(t, 0.002, 0.05, 0.04, 0.0001, 0.04, 0.02); src.connect(hp); hp.connect(g); src.start(t); src.stop(t + 0.1);
   },
   chord(ch, t, dur) {
+    if (this.track.style === 'candy') {
+      // off-beat "pah" plucks
+      const beat = dur / 4;
+      for (const k of [1, 3]) for (const n of ch) this.osc('triangle', this.freq(n), t + k * beat, t + k * beat + 0.25, this.env(t + k * beat, 0.003, 0.05, 0.15, 0.0001, 0.15, 0.03));
+      return;
+    }
     const space = this.track.style === 'space';
     // soft pad
     const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = space ? 420 : 700;
