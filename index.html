@@ -1113,15 +1113,29 @@ function resolveCollisions() {
 
 // ---------------- input ----------------
 const canvas = document.getElementById('c');
-const pointers = new Map(), keys = new Set();
-canvas.addEventListener('pointerdown', e => { pointers.set(e.pointerId, e.clientX < innerWidth / 2 ? -1 : 1); music.resume(); });
+// Held touches: id -> { side, t }. A release the browser never delivers (system gesture, finger off the
+// screen edge, app switch) would leave a phantom "held" entry and the snake stuck turning, so the set is
+// rebuilt from the browser's own touch list on every touch event, cleared whenever the page loses focus or
+// a game starts, and any entry with no activity for a while is dropped.
+const pointers = new Map(), keys = new Set(), HOLD_MAX = 8;
+const side = x => x < innerWidth / 2 ? -1 : 1;
+canvas.addEventListener('pointerdown', e => { pointers.set(e.pointerId, { side: side(e.clientX), t: performance.now() }); music.resume(); });
+canvas.addEventListener('pointermove', e => { const p = pointers.get(e.pointerId); if (p) p.t = performance.now(); });
 const release = e => pointers.delete(e.pointerId);
 window.addEventListener('pointerup', release); window.addEventListener('pointercancel', release);
-window.addEventListener('blur', () => pointers.clear());
+const syncTouches = e => {
+  pointers.clear();
+  for (const t of e.touches) if (t.target === canvas) pointers.set('t' + t.identifier, { side: side(t.clientX), t: performance.now() });
+};
+for (const ev of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) window.addEventListener(ev, syncTouches, { passive: true });
+const clearInput = () => { pointers.clear(); keys.clear(); fireHeld = false; };
+window.addEventListener('blur', clearInput);
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearInput(); });
 window.addEventListener('keydown', e => keys.add(e.key)); window.addEventListener('keyup', e => keys.delete(e.key));
 function readInput(s) {
   let l = false, r = false;
-  for (const v of pointers.values()) { if (v < 0) l = true; else r = true; }
+  const now = performance.now();
+  for (const [id, p] of pointers) { if (now - p.t > HOLD_MAX * 1000) { pointers.delete(id); continue; } if (p.side < 0) l = true; else r = true; }
   if (keys.has('ArrowLeft') || keys.has('a')) l = true;
   if (keys.has('ArrowRight') || keys.has('d')) r = true;
   s.boost = (l && r) || keys.has(' ') || keys.has('Shift') || keys.has('ArrowUp');
@@ -1154,7 +1168,7 @@ function disposeScene() {
 function startGame() {
   disposeScene();
   seed = Math.random() * 1000;
-  foods = []; snakes = []; bolts = []; score = 0; time = 0; fireHeld = false;
+  foods = []; snakes = []; bolts = []; score = 0; time = 0; clearInput();
   buildWorld();
   player = new Snake(true, 0x3fb950);
   player.spawn(0, 0, Math.random() * TAU);
@@ -1447,7 +1461,7 @@ document.getElementById('play').addEventListener('click', startGame);
 document.getElementById('again').addEventListener('click', startGame);
 function toMenu() {
   over.classList.add('hidden'); hud.classList.add('hidden'); muteBtn.classList.add('hidden'); homeBtn.classList.add('hidden'); fireBtn.classList.add('hidden');
-  menu.classList.remove('hidden'); state = 'menu'; fireHeld = false; pointers.clear(); keys.clear(); music.stop();
+  menu.classList.remove('hidden'); state = 'menu'; clearInput(); music.stop();
 }
 document.getElementById('toMenu').addEventListener('click', toMenu);
 const homeBtn = document.getElementById('home');
@@ -1488,6 +1502,7 @@ animate();
     if (q.get('at') === 'pool' && pools.length) { const p = pools[0]; player.spawn(p.x, p.z + p.r + 14, Math.PI); updateCamera(0, true); }
     if (q.get('at') === 'ramp' && ramps.length) { const rp = ramps[0]; player.spawn(rp.x - rp.hx * 12, rp.z - rp.hz * 12, rp.heading); updateCamera(0, true); }
     if (q.get('unicorn')) player.setUnicorn(true);
+    if (q.has('debug')) window.__dbg = { pointers: () => [...pointers.keys()], heading: () => player.heading, turn: () => player.turn };
     if (q.get('burn')) player.ignite();
     if (q.get('gun')) { player.arm(); player.shoot(); }
   }
