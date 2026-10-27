@@ -1,4 +1,4 @@
-const CACHE = 'paigesnake-v10';
+const CACHE = 'paigesnake-v11';
 const FILES = ['./', './index.html', './vendor/three.module.min.js', './manifest.json', './icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
