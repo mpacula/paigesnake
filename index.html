@@ -803,7 +803,7 @@ function spawnFood(x, z, type) {
   }
   if (!type && Math.random() < UNICORN_CHANCE) type = 'unicorn';
   if (!type && Math.random() < POOP_CHANCE) type = 'poop';
-  if (!type && Math.random() < JETPACK_CHANCE && foods.filter(f => f.type === 'jetpack').length < 2) type = 'jetpack';
+  if (!type && Math.random() < JETPACK_CHANCE) type = 'jetpack';
   if (!type && Math.random() < BLASTER_CHANCE && foods.filter(f => f.type === 'blaster').length < 2) type = 'blaster';
   type = type || FOOD_TYPES[Math.floor(Math.random() * FOOD_TYPES.length)];
   const g = makeFoodMesh(type);
