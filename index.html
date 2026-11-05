@@ -54,6 +54,7 @@
   <span>📏 <b id="len">6</b></span>
   <span>🐍 <b id="alive">0</b></span>
   <span id="uni" class="hidden">🦄 <b id="uniT">30</b>s</span>
+  <span id="sick" class="hidden">🤢 <b id="sickT">5</b>s</span>
 </div>
 <button id="mute" class="hidden" aria-label="Toggle music">🔊</button>
 <button id="home" class="hidden" aria-label="Start over">🏠</button>
@@ -255,6 +256,7 @@ const checkTex = makeTex(64, (x, y) => (((x >> 4) + (y >> 4)) % 2) ? [255, 255, 
 const caneTex = makeTex(64, (x, y) => ((x + y) % 16 < 8) ? [235, 40, 70] : [255, 255, 255], 1);
 const fireMats = [new THREE.MeshBasicMaterial({ color: 0xff6a00 }), new THREE.MeshBasicMaterial({ color: 0xffd23a }), new THREE.MeshBasicMaterial({ color: 0xff2e00 })];
 const fireGeo = new THREE.ConeGeometry(0.45, 1.5, 5);
+const stinkGeo = new THREE.SphereGeometry(0.5, 8, 6), stinkMat = new THREE.MeshLambertMaterial({ color: 0x8fd14f, transparent: true, opacity: 0.45, depthWrite: false });
 
 // ---------------- shared geometry / materials ----------------
 const frondGeo = (() => {
@@ -708,6 +710,8 @@ function buildWorld() {
 // ---------------- food ----------------
 const FOOD_TYPES = ['apple', 'banana', 'popsicle'];
 const UNICORN_CHANCE = 0.05, UNICORN_TIME = 30, UNICORN_EXTEND = 5;
+const POOP_CHANCE = 0.05, SICK_TIME = 5, SICK_SPEED = 0.55;
+const poopMat = lam(0x6b4423);
 const BLASTER_CHANCE = 0.16, BLASTER_TIME = 15, BOLT_SPEED = 42, BOLT_LIFE = 1.6;
 const RAINBOW = [0xff3b5c, 0xff8c1a, 0xffe03a, 0x3ddc84, 0x3aa0ff, 0x9b5de5];
 const FG = {
@@ -746,6 +750,10 @@ function makeFoodMesh(type) {
   const g = new THREE.Group();
   if (type === 'blaster') {
     const b = makeBlaster(0.9); b.position.y = 0.3; b.rotation.z = 0.2; g.add(b);
+  } else if (type === 'poop') { // a swirl of three stacked blobs with a curled tip
+    for (const [r, y] of [[0.75, -0.3], [0.58, 0.3], [0.42, 0.78]]) { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 9), poopMat); m.position.y = y; m.scale.y = 0.75; g.add(m); }
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 8), poopMat); tip.position.set(0.1, 1.3, 0); tip.rotation.z = -0.5; g.add(tip);
+    const wg = new THREE.Group(); for (let i = 0; i < 3; i++) { const w = new THREE.Mesh(stinkGeo, stinkMat); w.position.set((i - 1) * 0.6, 1.3 + i * 0.25, 0); w.scale.setScalar(0.45); wg.add(w); } g.add(wg);
   } else if (type === 'apple') {
     g.add(new THREE.Mesh(FG.sphere, FM.apple));
     const s = new THREE.Mesh(FG.stem, FM.stem); s.position.y = 0.85; g.add(s);
@@ -773,6 +781,7 @@ function spawnFood(x, z, type) {
     }
   }
   if (!type && Math.random() < UNICORN_CHANCE) type = 'unicorn';
+  if (!type && Math.random() < POOP_CHANCE) type = 'poop';
   if (!type && Math.random() < BLASTER_CHANCE && foods.filter(f => f.type === 'blaster').length < 2) type = 'blaster';
   type = type || FOOD_TYPES[Math.floor(Math.random() * FOOD_TYPES.length)];
   const g = makeFoodMesh(type);
@@ -937,9 +946,11 @@ class Snake {
     this.fire = new THREE.Group(); this.fire.visible = false;
     for (let i = 0; i < 14; i++) this.fire.add(new THREE.Mesh(fireGeo, fireMats[i % 3]));
     this.burnT = 0; this.shrinkT = 0;
+    this.stink = new THREE.Group(); this.stink.visible = false; this.sickT = 0;
+    for (let i = 0; i < 10; i++) { const m = new THREE.Mesh(stinkGeo, stinkMat); m.userData.phase = i / 10; this.stink.add(m); }
     this.attach = CHARACTERS[kind].attach.map(a => makeAttach(a, this.color));
     this.frames = new Float32Array(MAX_RINGS * 9);
-    scene.add(this.body, this.head, this.uniHead, this.fire, this.helmet, this.gun, ...this.attach.map(a => a.im));
+    scene.add(this.body, this.head, this.uniHead, this.fire, this.stink, this.helmet, this.gun, ...this.attach.map(a => a.im));
     this.wobble = Math.random() * 100; this.thinkT = 0; this.target = null; this.skip = new Map();
     this.jinkT = rnd(3, 8); this.jinkLeft = 0; this.jinkDir = 1; // every few seconds a CPU snake makes a short random swerve, so no steady-state pattern can trap it
     this.x = 0; this.z = 0; this.y = 0; this.vy = 0; this.climb = 0; this.air = false; this.heading = 0; this.trail = []; this.trailLen = 0;
@@ -953,11 +964,11 @@ class Snake {
     for (let i = 0; i <= n; i++) { const px = x - Math.sin(heading) * i * SEG_SPACING, pz = z - Math.cos(heading) * i * SEG_SPACING; this.trail.push({ x: px, z: pz, y: heightAt(px, pz) }); }
     this.trailLen = n * SEG_SPACING;
     this.head.visible = true; this.target = null; this.thinkT = 0;
-    this.setBurning(false); this.setUnicorn(false); this.armT = 0; this.gun.visible = false;
+    this.setBurning(false); this.setSick(false); this.setUnicorn(false); this.armT = 0; this.gun.visible = false;
     this.placeSegments(); this.placeHead();
   }
   die() {
-    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.gun.visible = false; this.armT = 0; this.geo.setDrawRange(0, 0); for (const a of this.attach) a.im.count = 0; this.setBurning(false); this.uniT = 0;
+    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.gun.visible = false; this.armT = 0; this.geo.setDrawRange(0, 0); for (const a of this.attach) a.im.count = 0; this.setBurning(false); this.setSick(false); this.uniT = 0;
   }
   setUnicorn(on) {
     this.uniT = on ? UNICORN_TIME : 0;
@@ -993,6 +1004,24 @@ class Snake {
     if (this.burnT <= 0) { this.setBurning(true); this.shrinkT = 0.15; }
     this.burnT = 3;
   }
+  // sick: slow, flashing pale/green, trailing green clouds
+  setSick(on) { this.stink.visible = on; this.sickT = on ? SICK_TIME : 0; if (!on) { this.headMat.emissive.setHex(0); this.uniHeadMat.emissive.setHex(0); } }
+  sicken() { this.setSick(true); }
+  updateSick(dt) {
+    if (this.sickT <= 0) return;
+    this.sickT -= dt;
+    if (this.sickT <= 0) { this.setSick(false); return; }
+    const f = 0.5 + 0.5 * Math.sin(time * 14);
+    tmpC.setHex(0x4a7a1a).lerp(tmpC2.setHex(0x9aa88a), f).multiplyScalar(0.5);
+    this.headMat.emissive.copy(tmpC); this.uniHeadMat.emissive.copy(tmpC);
+    const n = Math.max(1, Math.min(this.len, 8));
+    this.stink.children.forEach((m, i) => {
+      const ph = ((m.userData.phase + time * 0.5) % 1 + 1) % 1;         // 0 = just emitted, 1 = faded away
+      const k = (i * 3) % n, px = this.seg[k * 3], pz = this.seg[k * 3 + 1], py = this.segY[k], s = this.seg[k * 3 + 2];
+      m.position.set(px + Math.sin(i * 2.1 + time) * 0.8, py + s * 1.4 + ph * 3.2, pz + Math.cos(i * 1.7 + time) * 0.8);
+      const sc = (0.5 + ph * 1.1) * (1 - ph * 0.3); m.scale.set(sc, sc * 0.8, sc);
+    });
+  }
   updateFire(dt) {
     if (this.burnT <= 0) return;
     this.burnT -= dt; this.shrinkT -= dt;
@@ -1023,7 +1052,7 @@ class Snake {
       }
       for (const [f, until] of this.skip) if (until < time || !foods.includes(f)) this.skip.delete(f);
       let best = null, bestD = 1e9;
-      for (const f of foods) { if (this.skip.has(f)) continue; const d = Math.hypot(f.x - this.x, f.z - this.z) * (f.type === 'unicorn' ? 0.5 : f.type === 'blaster' ? 0.7 : 1); if (d < bestD) { bestD = d; best = { x: f.x, z: f.z, food: f }; } }
+      for (const f of foods) { if (this.skip.has(f) || f.type === 'poop') continue; const d = Math.hypot(f.x - this.x, f.z - this.z) * (f.type === 'unicorn' ? 0.5 : f.type === 'blaster' ? 0.7 : 1); if (d < bestD) { bestD = d; best = { x: f.x, z: f.z, food: f }; } }
       if (this.armT > 0) {
         for (const o of snakes) {
           if (o === this || !o.alive) continue;
@@ -1067,7 +1096,7 @@ class Snake {
     }
   }
   update(dt) {
-    const sp = this.speed * (this.boost ? 1.65 : 1);
+    const sp = this.speed * (this.sickT > 0 ? SICK_SPEED : this.boost ? 1.65 : 1);
     this.heading += this.turn * TURN_RATE * dt;
     let nx = this.x + Math.sin(this.heading) * sp * dt, nz = this.z + Math.cos(this.heading) * sp * dt;
     const r = Math.hypot(nx, nz);
@@ -1092,7 +1121,7 @@ class Snake {
     }
     this.placeSegments(); this.placeHead();
     if (inPool(this.x, this.z)) this.ignite();
-    this.updateFire(dt); this.updateUnicorn(dt); this.updateWeapon(dt);
+    this.updateFire(dt); this.updateSick(dt); this.updateUnicorn(dt); this.updateWeapon(dt);
   }
   placeHead() {
     const h = this.uniT > 0 ? this.uniHead : this.head;
@@ -1132,7 +1161,7 @@ class Snake {
     }
     // 2. tube vertices: a frame per ring (tangent toward the head, side from world up), striped colours, lighter belly
     const pos = this.geo.attributes.position.array, nrm = this.geo.attributes.normal.array, col = this.geo.attributes.color.array;
-    const rainbow = this.uniT > 0, space = world === 'space';
+    const rainbow = this.uniT > 0, space = world === 'space', sick = this.sickT > 0, sickF = 0.5 + 0.5 * Math.sin(time * 14);
     let tx = Math.sin(this.heading), ty = 0, tz = Math.cos(this.heading);
     for (let j = 0; j < rings; j++) {
       const a = Math.max(j - 1, 0) * 4, b = Math.min(j + 1, rings - 1) * 4;
@@ -1147,6 +1176,7 @@ class Snake {
       else if (this.pattern === 'stripes') tmpC.copy(i % 4 < 2 ? this.color : this.cDark);
       else if (this.pattern === 'bands') tmpC.copy(this.color).lerp(this.cSpot, i % 2 ? 0.55 : 0);
       else tmpC.copy(this.color);
+      if (sick) tmpC.lerp(tmpC2.setHex(sickF > 0.5 ? 0x7cc93a : 0xd9e3c4), 0.6);
       // belly: peach with alternating scute shading; rainbow/suit keep a lighter underside
       if (rainbow || space) tmpC2.copy(tmpC).lerp(SUIT_C, 0.45); else tmpC2.copy(this.cBelly).multiplyScalar(j % 2 ? 1 : 0.9);
       const cx = c[j * 4], cy = c[j * 4 + 1], cz = c[j * 4 + 2], r = c[j * 4 + 3];
@@ -1232,6 +1262,7 @@ function eatFood(s, i) {
   if (f.type === 'unicorn') { s.setUnicorn(true); if (s.isPlayer) { score += 3; music.sparkle(); } }
   else if (s.uniT > 0) s.uniT = Math.min(UNICORN_TIME, s.uniT + UNICORN_EXTEND); // any snack keeps unicorn mode going a little longer
   if (f.type === 'blaster') { s.arm(); if (s.isPlayer) { score += 2; music.powerup(); } }
+  if (f.type === 'poop') { s.sicken(); if (s.isPlayer) music.bleh(); return; }
   if (s.isPlayer) score += 1;
   if (foods.length < FOOD_COUNT) spawnFood();
 }
@@ -1358,6 +1389,7 @@ function step(dt) {
   const armed = player.alive && player.armT > 0;
   fireBtn.classList.toggle('hidden', !armed); if (armed) fireTEl.textContent = Math.ceil(player.armT);
   const uni = player.uniT > 0; uniEl.classList.toggle('hidden', !uni); if (uni) uniTEl.textContent = Math.ceil(player.uniT);
+  const sick = player.sickT > 0; sickEl.classList.toggle('hidden', !sick); if (sick) sickTEl.textContent = Math.ceil(player.sickT);
   aliveEl.textContent = snakes.filter(s => s.alive && !s.isPlayer).length;
 }
 
@@ -1577,6 +1609,11 @@ const music = {
     const bp = this.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 2;
     const g = this.env(t, 0.003, 0.12, 0.15, 0.0001, 0.15, 0.05); src.connect(bp); bp.connect(g); src.start(t); src.stop(t + 0.25);
   },
+  bleh() { // a queasy downward wobble
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    [55, 52, 48, 43].forEach((n, i) => { this.osc('sawtooth', this.freq(n), t + i * 0.11, t + i * 0.11 + 0.16, this.env(t + i * 0.11, 0.01, 0.06, 0.1, 0.0001, 0.12, 0.05)); });
+  },
   powerup() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
@@ -1595,6 +1632,7 @@ const scoreEl = document.getElementById('score'), lenEl = document.getElementByI
 const muteBtn = document.getElementById('mute'), musicChk = document.getElementById('musicOn');
 const fireBtn = document.getElementById('fire'), fireTEl = document.getElementById('fireT');
 const uniEl = document.getElementById('uni'), uniTEl = document.getElementById('uniT');
+const sickEl = document.getElementById('sick'), sickTEl = document.getElementById('sickT');
 fireBtn.addEventListener('pointerdown', e => { e.preventDefault(); fireHeld = true; music.resume(); });
 window.addEventListener('pointerup', () => { fireHeld = false; }); window.addEventListener('pointercancel', () => { fireHeld = false; });
 muteBtn.addEventListener('click', () => { music.setEnabled(!music.enabled); if (music.enabled) { music.unlock(); music.resume(); } });
@@ -1673,6 +1711,7 @@ animate();
     if (q.get('unicorn')) player.setUnicorn(true);
     if (q.has('debug')) window.__dbg = { pointers: () => [...pointers.keys()], heading: () => player.heading, turn: () => player.turn };
     if (q.get('burn')) player.ignite();
+    if (q.get('sick')) { player.sicken(); spawnFood(player.x + Math.sin(player.heading) * 7, player.z + Math.cos(player.heading) * 7, 'poop'); }
     if (q.get('gun')) { player.arm(); player.shoot(); }
   }
 }
