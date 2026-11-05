@@ -43,7 +43,9 @@
   #fire{position:fixed;left:50%;bottom:max(22px,env(safe-area-inset-bottom));transform:translateX(-50%);width:104px;height:104px;
     border-radius:999px;border:4px solid rgba(255,255,255,.7);background:rgba(255,120,40,.75);color:#fff;font-size:38px;font-weight:800;
     pointer-events:auto;cursor:pointer;box-shadow:0 0 24px rgba(255,140,40,.6);touch-action:none;-webkit-user-select:none;user-select:none}
-  #fire small{display:block;font-size:16px;margin-top:-4px}
+  #fire small,#jet small{display:block;font-size:16px;margin-top:-4px}
+  #jet{position:fixed;right:22px;bottom:max(22px,env(safe-area-inset-bottom));width:104px;height:104px;border-radius:999px;border:4px solid rgba(255,255,255,.7);
+    background:rgba(60,140,255,.75);color:#fff;font-size:38px;font-weight:800;pointer-events:auto;cursor:pointer;box-shadow:0 0 24px rgba(80,160,255,.6);touch-action:none;-webkit-user-select:none;user-select:none}
   .hint{opacity:.85;font-size:17px;max-width:440px;line-height:1.4}
 </style>
 </head>
@@ -61,6 +63,7 @@
 <button id="home" class="hidden" aria-label="Start over">🏠</button>
 <button id="cam" class="hidden" aria-label="Toggle camera">📷</button>
 <button id="fire" class="hidden" aria-label="Fire">🔫<small id="fireT">15</small></button>
+<button id="jet" class="hidden" aria-label="Jetpack thrust">🚀<small id="jetT">15</small></button>
 
 <div id="menu" class="overlay">
   <h1>🐍 Paige's Snake</h1>
@@ -713,7 +716,8 @@ function buildWorld() {
 const FOOD_TYPES = ['apple', 'banana', 'popsicle'];
 const UNICORN_CHANCE = 0.05, UNICORN_TIME = 30, UNICORN_EXTEND = 5;
 const POOP_CHANCE = 0.05, SICK_TIME = 5, SICK_SPEED = 0.55;
-const BULGE_SPEED = 12, BULGE_SIZE = 0.5, BULGE_W = 1.7; // swallowed food travels down the body as a bump
+const BULGE_SPEED = 12, BULGE_SIZE = 0.5, BULGE_W = 1.7;
+const JETPACK_CHANCE = 0.05, JETPACK_TIME = 15, JET_ACCEL = 62, JET_MAX_VY = 17, JET_MAX_H = 30; // jetpack: thrust while held, fall under gravity when released // swallowed food travels down the body as a bump
 const poopMat = lam(0x6b4423);
 const BLASTER_CHANCE = 0.16, BLASTER_TIME = 15, BOLT_SPEED = 42, BOLT_LIFE = 1.6;
 const RAINBOW = [0xff3b5c, 0xff8c1a, 0xffe03a, 0x3ddc84, 0x3aa0ff, 0x9b5de5];
@@ -739,6 +743,18 @@ function addUnicornBits(g, scale = 1) {
   }
   g.scale.setScalar(scale);
 }
+function makeJetpack(scale = 1) {
+  const g = new THREE.Group(), tank = lam(0xbfc6d2), cap = lam(0xe0483c), strap = lam(0x3b3f4a);
+  for (const sx of [-0.4, 0.4]) {
+    const t = new THREE.Mesh(GEO.cyl, tank); t.scale.set(0.34, 1.3, 0.34); t.position.set(sx, 0, 0); g.add(t);
+    const c = new THREE.Mesh(GEO.sphere, cap); c.scale.setScalar(0.3); c.position.set(sx, 0.68, 0); g.add(c);
+    const n = new THREE.Mesh(GEO.cone, strap); n.scale.set(0.3, 0.3, 0.3); n.position.set(sx, -0.75, 0); n.rotation.x = Math.PI; g.add(n);
+    const fl = new THREE.Mesh(fireGeo, fireMats[1]); fl.name = 'flame'; fl.position.set(sx, -1.5, 0); fl.rotation.x = Math.PI; fl.scale.setScalar(0.001); g.add(fl);
+  }
+  const bar = new THREE.Mesh(GEO.box, strap); bar.scale.set(1.1, 0.18, 0.2); bar.position.set(0, 0.2, 0.15); g.add(bar);
+  g.scale.setScalar(scale);
+  return g;
+}
 function makeBlaster(scale = 1) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(GEO.box, FM.gunBody); body.scale.set(0.45, 0.4, 1.1); g.add(body);
@@ -753,6 +769,8 @@ function makeFoodMesh(type) {
   const g = new THREE.Group();
   if (type === 'blaster') {
     const b = makeBlaster(0.9); b.position.y = 0.3; b.rotation.z = 0.2; g.add(b);
+  } else if (type === 'jetpack') {
+    const j = makeJetpack(0.85); j.position.y = 0.6; j.rotation.y = 0.5; g.add(j);
   } else if (type === 'poop') { // a swirl of three stacked blobs with a curled tip
     for (const [r, y] of [[0.75, -0.3], [0.58, 0.3], [0.42, 0.78]]) { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 9), poopMat); m.position.y = y; m.scale.y = 0.75; g.add(m); }
     const tip = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 8), poopMat); tip.position.set(0.1, 1.3, 0); tip.rotation.z = -0.5; g.add(tip);
@@ -785,6 +803,7 @@ function spawnFood(x, z, type) {
   }
   if (!type && Math.random() < UNICORN_CHANCE) type = 'unicorn';
   if (!type && Math.random() < POOP_CHANCE) type = 'poop';
+  if (!type && Math.random() < JETPACK_CHANCE && foods.filter(f => f.type === 'jetpack').length < 2) type = 'jetpack';
   if (!type && Math.random() < BLASTER_CHANCE && foods.filter(f => f.type === 'blaster').length < 2) type = 'blaster';
   type = type || FOOD_TYPES[Math.floor(Math.random() * FOOD_TYPES.length)];
   const g = makeFoodMesh(type);
@@ -796,7 +815,7 @@ function spawnFood(x, z, type) {
 function updateFoods(dt) {
   for (const f of foods) {
     f.g.position.y = f.baseY + Math.sin(time * 2.2 + f.phase) * 0.22;
-    f.g.rotation.y += dt * (f.type === 'unicorn' || f.type === 'blaster' ? 2.5 : 1.2);
+    f.g.rotation.y += dt * (f.type === 'unicorn' || f.type === 'blaster' || f.type === 'jetpack' ? 2.5 : 1.2);
   }
 }
 
@@ -946,6 +965,7 @@ class Snake {
     for (const sx of [-0.35, 0.35]) { const tank = new THREE.Mesh(GEO.cyl, MAT.suit); tank.scale.set(0.28, 1.0, 0.28); tank.position.set(sx, -0.45, -1.95); this.helmet.add(tank); }
     this.helmet.visible = false;
     this.gun = makeBlaster(0.75); this.gun.visible = false; this.armT = 0; this.fireCd = 0; this.flashT = 0; this.firing = false;
+    this.jet = makeJetpack(0.8); this.jet.visible = false; this.jetT = 0; this.thrust = false;
     this.fire = new THREE.Group(); this.fire.visible = false;
     for (let i = 0; i < 14; i++) this.fire.add(new THREE.Mesh(fireGeo, fireMats[i % 3]));
     this.burnT = 0; this.shrinkT = 0;
@@ -954,12 +974,12 @@ class Snake {
     for (let i = 0; i < 10; i++) { const m = new THREE.Mesh(stinkGeo, stinkMat); m.userData.phase = i / 10; this.stink.add(m); }
     this.attach = CHARACTERS[kind].attach.map(a => makeAttach(a, this.color));
     this.frames = new Float32Array(MAX_RINGS * 9);
-    scene.add(this.body, this.head, this.uniHead, this.fire, this.stink, this.helmet, this.gun, ...this.attach.map(a => a.im));
+    scene.add(this.body, this.head, this.uniHead, this.fire, this.stink, this.helmet, this.gun, this.jet, ...this.attach.map(a => a.im));
     this.wobble = Math.random() * 100; this.thinkT = 0; this.target = null; this.skip = new Map();
     this.jinkT = rnd(3, 8); this.jinkLeft = 0; this.jinkDir = 1; // every few seconds a CPU snake makes a short random swerve, so no steady-state pattern can trap it
     this.x = 0; this.z = 0; this.y = 0; this.vy = 0; this.climb = 0; this.air = false; this.heading = 0; this.trail = []; this.trailLen = 0;
     this.segY = new Float32Array(MAX_SEG);
-    for (const o of [this.head, this.uniHead, this.helmet, this.gun]) o.rotation.order = 'YXZ';
+    for (const o of [this.head, this.uniHead, this.helmet, this.gun, this.jet]) o.rotation.order = 'YXZ';
   }
   spawn(x, z, heading) {
     this.x = x; this.z = z; this.heading = heading; this.len = START_LEN; this.alive = true;
@@ -968,11 +988,11 @@ class Snake {
     for (let i = 0; i <= n; i++) { const px = x - Math.sin(heading) * i * SEG_SPACING, pz = z - Math.cos(heading) * i * SEG_SPACING; this.trail.push({ x: px, z: pz, y: heightAt(px, pz) }); }
     this.trailLen = n * SEG_SPACING;
     this.head.visible = true; this.target = null; this.thinkT = 0;
-    this.setBurning(false); this.setSick(false); this.setUnicorn(false); this.armT = 0; this.gun.visible = false;
+    this.setBurning(false); this.setSick(false); this.setUnicorn(false); this.armT = 0; this.gun.visible = false; this.jetT = 0; this.jet.visible = false; this.thrust = false;
     this.placeSegments(); this.placeHead();
   }
   die() {
-    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.gun.visible = false; this.armT = 0; this.geo.setDrawRange(0, 0); for (const a of this.attach) a.im.count = 0; this.setBurning(false); this.setSick(false); this.uniT = 0;
+    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.gun.visible = false; this.jet.visible = false; this.jetT = 0; this.thrust = false; this.armT = 0; this.geo.setDrawRange(0, 0); for (const a of this.attach) a.im.count = 0; this.setBurning(false); this.setSick(false); this.uniT = 0;
   }
   setUnicorn(on) {
     this.uniT = on ? UNICORN_TIME : 0;
@@ -981,6 +1001,12 @@ class Snake {
   }
   restoreStripes() { /* colours are rebuilt every frame in placeSegments */ }
   arm() { this.armT = BLASTER_TIME; this.fireCd = 0; }
+  equipJet() { this.jetT = JETPACK_TIME; }
+  updateJet(dt) {
+    if (this.jetT > 0) { this.jetT -= dt; if (this.jetT <= 0) { this.jet.visible = false; this.thrust = false; } }
+    const on = this.jetT > 0 && this.thrust && this.alive;
+    for (const fl of this.jet.children) if (fl.name === 'flame') { const sc = on ? rnd(0.5, 0.9) : 0.001; fl.scale.set(sc, sc * rnd(0.8, 1.5), sc); }
+  }
   shoot() {
     if (!this.alive || this.armT <= 0 || this.fireCd > 0) return;
     this.fireCd = this.isPlayer ? 0.28 : 0.6; this.flashT = 0.08;
@@ -1061,7 +1087,7 @@ class Snake {
       }
       for (const [f, until] of this.skip) if (until < time || !foods.includes(f)) this.skip.delete(f);
       let best = null, bestD = 1e9;
-      for (const f of foods) { if (this.skip.has(f) || f.type === 'poop') continue; const d = Math.hypot(f.x - this.x, f.z - this.z) * (f.type === 'unicorn' ? 0.5 : f.type === 'blaster' ? 0.7 : 1); if (d < bestD) { bestD = d; best = { x: f.x, z: f.z, food: f }; } }
+      for (const f of foods) { if (this.skip.has(f) || f.type === 'poop') continue; const d = Math.hypot(f.x - this.x, f.z - this.z) * (f.type === 'unicorn' ? 0.5 : f.type === 'blaster' || f.type === 'jetpack' ? 0.7 : 1); if (d < bestD) { bestD = d; best = { x: f.x, z: f.z, food: f }; } }
       if (this.armT > 0) {
         for (const o of snakes) {
           if (o === this || !o.alive) continue;
@@ -1095,6 +1121,7 @@ class Snake {
       }
       this.target = best;
     }
+    this.thrust = this.jetT > 0 && Math.sin(time * 0.9 + this.wobble) > 0.25;
     this.jinkT -= dt;
     if (this.jinkT <= 0) { this.jinkT = rnd(3, 8); this.jinkLeft = rnd(0.35, 0.8); this.jinkDir = Math.random() < 0.5 ? -1 : 1; }
     if (this.jinkLeft > 0) { this.jinkLeft -= dt; this.turn = this.jinkDir; return; }
@@ -1114,12 +1141,14 @@ class Snake {
     this.x = nx; this.z = nz;
     // vertical motion: follow the ground, but launch when it falls away (ramp kickers, ledges)
     const g = heightAt(nx, nz);
+    if (this.jetT > 0 && this.thrust) { this.air = true; this.vy = Math.min(JET_MAX_VY, this.vy + JET_ACCEL * dt); } // thrust: climb while held, gravity still applies below
     if (!this.air) {
       if (g < this.y - 0.3 && d > 0) { this.air = true; this.vy = clamp(this.climb, 0, 16); }
       else { this.climb = (g - this.y) / Math.max(dt, 1e-4); this.y = g; }
     }
     if (this.air) {
       this.vy -= GRAVITY * dt; this.y += this.vy * dt;
+      if (this.y - g > JET_MAX_H) { this.y = g + JET_MAX_H; this.vy = Math.min(this.vy, 0); }
       if (this.y <= g) { this.y = g; this.air = false; this.vy = 0; this.climb = 0; }
     }
     if (d > 0) { this.trail.unshift({ x: nx, z: nz, y: this.y }); this.trailLen += d; }
@@ -1130,7 +1159,7 @@ class Snake {
     }
     this.placeSegments(); this.placeHead();
     if (inPool(this.x, this.z)) this.ignite();
-    this.updateFire(dt); this.updateSick(dt); this.updateBulges(dt); this.updateUnicorn(dt); this.updateWeapon(dt);
+    this.updateFire(dt); this.updateSick(dt); this.updateBulges(dt); this.updateUnicorn(dt); this.updateWeapon(dt); this.updateJet(dt);
   }
   placeHead() {
     const h = this.uniT > 0 ? this.uniHead : this.head;
@@ -1141,6 +1170,8 @@ class Snake {
     if (this.helmet.visible) { this.helmet.position.copy(h.position); this.helmet.rotation.copy(h.rotation); }
     this.gun.visible = this.armT > 0 && this.alive;
     if (this.gun.visible) { this.gun.position.copy(h.position); this.gun.position.y += HEAD_R + 0.25; this.gun.rotation.copy(h.rotation); }
+    this.jet.visible = this.jetT > 0 && this.alive;
+    if (this.jet.visible) { this.jet.position.set(h.position.x - Math.sin(this.heading) * 1.6, h.position.y + 0.1, h.position.z - Math.cos(this.heading) * 1.6); this.jet.rotation.copy(h.rotation); }
   }
   placeSegments() {
     const t = this.trail, L = this.len * SEG_SPACING, rings = this.len * 2 + 1, c = this.ringC;
@@ -1273,6 +1304,7 @@ function eatFood(s, i) {
   if (f.type === 'unicorn') { s.setUnicorn(true); if (s.isPlayer) { score += 3; music.sparkle(); } }
   else if (s.uniT > 0) s.uniT = Math.min(UNICORN_TIME, s.uniT + UNICORN_EXTEND); // any snack keeps unicorn mode going a little longer
   if (f.type === 'blaster') { s.arm(); if (s.isPlayer) { score += 2; music.powerup(); } }
+  if (f.type === 'jetpack') { s.equipJet(); if (s.isPlayer) { score += 2; music.powerup(); } }
   if (f.type === 'poop') { s.sicken(); if (s.isPlayer) music.bleh(); return; }
   s.swallow(); if (s.isPlayer) music.gulp();
   if (s.isPlayer) score += 1;
@@ -1283,15 +1315,17 @@ function resolveCollisions() {
     if (!a.alive) continue;
     for (let i = foods.length - 1; i >= 0; i--) {
       const f = foods[i];
+      if (a.y - f.baseY > 2.0) continue;
       if (Math.hypot(f.x - a.x, f.z - a.z) < HEAD_R + 1.3) eatFood(a, i);
     }
     for (const b of snakes) {
       if (b === a || !b.alive || !a.alive) continue;
-      if (Math.hypot(b.x - a.x, b.z - a.z) < HEAD_R * 1.8) {
+      if (Math.abs(b.y - a.y) < 2.5 && Math.hypot(b.x - a.x, b.z - a.z) < HEAD_R * 1.8) {
         const loser = a.len >= b.len ? b : a; kill(loser, loser === a ? b : a); continue;
       }
       const sg = b.seg;
       for (let k = 0; k < b.len; k++) {
+        if (Math.abs(b.segY[k] - a.y) > 2.5) continue;
         const dx = sg[k * 3] - a.x, dz = sg[k * 3 + 1] - a.z, rr = (HEAD_R + sg[k * 3 + 2]) * 0.85;
         if (dx * dx + dz * dz < rr * rr) { kill(b, a); break; }
       }
@@ -1316,7 +1350,7 @@ const syncTouches = e => {
   for (const t of e.touches) if (t.target === canvas) pointers.set('t' + t.identifier, { side: side(t.clientX), t: performance.now() });
 };
 for (const ev of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) window.addEventListener(ev, syncTouches, { passive: true });
-const clearInput = () => { pointers.clear(); keys.clear(); fireHeld = false; };
+const clearInput = () => { pointers.clear(); keys.clear(); fireHeld = false; jetHeld = false; };
 window.addEventListener('blur', clearInput);
 document.addEventListener('visibilitychange', () => { if (document.hidden) clearInput(); });
 window.addEventListener('keydown', e => keys.add(e.key)); window.addEventListener('keyup', e => keys.delete(e.key));
@@ -1329,8 +1363,9 @@ function readInput(s) {
   s.boost = (l && r) || keys.has(' ') || keys.has('Shift') || keys.has('ArrowUp');
   s.turn = (l && r) ? 0 : (l ? 1 : 0) - (r ? 1 : 0);
   s.firing = fireHeld || keys.has('f') || keys.has('Enter');
+  s.thrust = jetHeld || keys.has('j') || keys.has('ArrowDown');
 }
-let fireHeld = false;
+let fireHeld = false, jetHeld = false;
 
 // ---------------- camera ----------------
 const camLook = new THREE.Vector3(), camPos = new THREE.Vector3();
@@ -1374,7 +1409,7 @@ function startGame() {
   music.unlock(); if (!NO_MUSIC) { music.init(); music.resume(); music.play(WORLD_TRACK[world]); }
 }
 function gameOver() {
-  state = 'over'; fireBtn.classList.add('hidden');
+  state = 'over'; fireBtn.classList.add('hidden'); jetBtn.classList.add('hidden');
   document.getElementById('finalScore').textContent = `Score ${score} · Length ${player.len}`;
   over.classList.remove('hidden');
 }
@@ -1400,6 +1435,7 @@ function step(dt) {
   scoreEl.textContent = score; lenEl.textContent = player.len;
   const armed = player.alive && player.armT > 0;
   fireBtn.classList.toggle('hidden', !armed); if (armed) fireTEl.textContent = Math.ceil(player.armT);
+  const jet = player.jetT > 0; jetBtn.classList.toggle('hidden', !jet); if (jet) jetTEl.textContent = Math.ceil(player.jetT);
   const uni = player.uniT > 0; uniEl.classList.toggle('hidden', !uni); if (uni) uniTEl.textContent = Math.ceil(player.uniT);
   const sick = player.sickT > 0; sickEl.classList.toggle('hidden', !sick); if (sick) sickTEl.textContent = Math.ceil(player.sickT);
   aliveEl.textContent = snakes.filter(s => s.alive && !s.isPlayer).length;
@@ -1654,7 +1690,9 @@ const fireBtn = document.getElementById('fire'), fireTEl = document.getElementBy
 const uniEl = document.getElementById('uni'), uniTEl = document.getElementById('uniT');
 const sickEl = document.getElementById('sick'), sickTEl = document.getElementById('sickT');
 fireBtn.addEventListener('pointerdown', e => { e.preventDefault(); fireHeld = true; music.resume(); });
-window.addEventListener('pointerup', () => { fireHeld = false; }); window.addEventListener('pointercancel', () => { fireHeld = false; });
+window.addEventListener('pointerup', () => { fireHeld = false; jetHeld = false; }); window.addEventListener('pointercancel', () => { fireHeld = false; jetHeld = false; });
+const jetBtn = document.getElementById('jet'), jetTEl = document.getElementById('jetT');
+jetBtn.addEventListener('pointerdown', e => { e.preventDefault(); jetHeld = true; music.resume(); });
 muteBtn.addEventListener('click', () => { music.setEnabled(!music.enabled); if (music.enabled) { music.unlock(); music.resume(); } });
 musicChk.addEventListener('change', () => music.setEnabled(musicChk.checked));
 document.addEventListener('visibilitychange', () => { if (music.ctx) { if (document.hidden) music.ctx.suspend(); else if (state !== 'menu') { music.resume(); music.unlock(); } } });
@@ -1670,7 +1708,7 @@ cpuIn.addEventListener('input', () => { cpuCount = +cpuIn.value; document.getEle
 document.getElementById('play').addEventListener('click', startGame);
 document.getElementById('again').addEventListener('click', startGame);
 function toMenu() {
-  over.classList.add('hidden'); hud.classList.add('hidden'); muteBtn.classList.add('hidden'); homeBtn.classList.add('hidden'); camBtn.classList.add('hidden'); fireBtn.classList.add('hidden');
+  over.classList.add('hidden'); hud.classList.add('hidden'); muteBtn.classList.add('hidden'); homeBtn.classList.add('hidden'); camBtn.classList.add('hidden'); fireBtn.classList.add('hidden'); jetBtn.classList.add('hidden');
   menu.classList.remove('hidden'); state = 'menu'; clearInput(); music.stop();
 }
 document.getElementById('toMenu').addEventListener('click', toMenu);
@@ -1735,6 +1773,7 @@ animate();
     if (q.get('unicorn')) player.setUnicorn(true);
     if (q.has('debug')) window.__dbg = { pointers: () => [...pointers.keys()], heading: () => player.heading, turn: () => player.turn };
     if (q.get('burn')) player.ignite();
+    if (q.get('jet')) player.equipJet();
     if (q.get('bulge')) { player.len = 24; player.bulges.push(2, 7, 12); }
     if (q.get('sick')) { player.sicken(); spawnFood(player.x + Math.sin(player.heading) * 7, player.z + Math.cos(player.heading) * 7, 'poop'); }
     if (q.get('gun')) { player.arm(); player.shoot(); }
