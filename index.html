@@ -73,6 +73,7 @@
     <div class="card" data-world="space"><span class="emoji">🚀</span>Space</div>
     <div class="card" data-world="candy"><span class="emoji">🍭</span>Candy</div>
     <div class="card" data-world="race"><span class="emoji">🏎️</span>Race</div>
+    <div class="card" data-world="reef"><span class="emoji">🐠</span>Reef</div>
   </div>
   <div class="sub">Your character</div>
   <div class="cards chars">
@@ -114,6 +115,7 @@ const WORLDS = {
   space:  { sky: 0x05030f, fog: 0x0b0718, fogNear: 80, fogFar: 260, hemiSky: 0x5a4fa0, hemiGround: 0x1a1424 },
   candy:  { sky: 0xffd6ec, fog: 0xffe4f1, fogNear: 100, fogFar: 320, hemiSky: 0xfff0f8, hemiGround: 0xffb0d0 },
   race:   { sky: 0x8fd0ff, fog: 0xc8e6f8, fogNear: 100, fogFar: 310, hemiSky: 0xdff2ff, hemiGround: 0x4a8a3a },
+  reef:   { sky: 0x0b4d7c, fog: 0x0f5f8f, fogNear: 45, fogFar: 200, hemiSky: 0x4fb0e0, hemiGround: 0x1a4f66 },
 };
 const GRAVITY = 28;
 
@@ -142,7 +144,7 @@ const CHARACTER_KINDS = Object.keys(CHARACTERS);
 let scene, camera, renderer, clock;
 let snakes = [], foods = [], player = null;
 let state = 'menu', score = 0, time = 0;
-let waterMesh = null, cloudMesh = null, pools = [], craters = [], ufos = [], ramps = [];
+let waterMesh = null, cloudMesh = null, pools = [], craters = [], ufos = [], ramps = [], fish = [], bubbles = null;
 
 // ---------------- noise / terrain ----------------
 function hash(ix, iz) {
@@ -172,6 +174,11 @@ function terrainAt(x, z) {
   if (world === 'race') {
     let h = fbm(x * 0.02 + seed, z * 0.02 + seed) * 2.2;
     if (r > R) { const t = (r - R) / 40; h += t * t * 45; }
+    return h;
+  }
+  if (world === 'reef') { // rippled sandy seabed walled in by rock
+    let h = 1.5 + fbm(x * 0.02 + seed, z * 0.02 + seed) * 5 + Math.sin(x * 0.9 + z * 0.4) * 0.12;
+    if (r > R) { const t = (r - R) / 30; h += t * t * 50; }
     return h;
   }
   if (world === 'forest') {
@@ -212,6 +219,9 @@ function groundColor(x, z, h, c) {
     c.setRGB(0.99, 0.78, 0.88).lerp(tmpC.setRGB(0.78, 0.96, 0.88), n);
     c.lerp(tmpC.setRGB(0.86, 0.80, 0.98), n2 * 0.6);
     if (h < 1.0) c.lerp(tmpC.setRGB(0.45, 0.25, 0.12), Math.min(1, (1.0 - h) / 1.2));
+  } else if (world === 'reef') {
+    c.setRGB(0.78, 0.76, 0.60).lerp(tmpC.setRGB(0.52, 0.62, 0.52), n);
+    if (h > 9) c.lerp(tmpC.setRGB(0.36, 0.42, 0.44), Math.min(1, (h - 9) / 12));
   } else if (world === 'space') {
     c.setRGB(0.60, 0.57, 0.68).lerp(tmpC.setRGB(0.38, 0.34, 0.48), n);
     if (h < -1) c.lerp(tmpC.setRGB(0.20, 0.17, 0.28), Math.min(1, (-1 - h) / 5));
@@ -307,6 +317,10 @@ const MAT = {
   gum0: lam(0xff6fa8, { flatShading: true }), gum1: lam(0x7ee8a0, { flatShading: true }), gum2: lam(0xffe066, { flatShading: true }), gum3: lam(0x9fb8ff, { flatShading: true }),
   helmet: new THREE.MeshPhongMaterial({ color: 0xa8dcff, transparent: true, opacity: 0.3, shininess: 140, specular: 0xffffff, depthWrite: false }),
   suit: lam(0xf4f4f8), pack: lam(0xc9ccd6),
+  coral0: lam(0xff6f91), coral1: lam(0xff9f43), coral2: lam(0xb86bff), coral3: lam(0xffe066), brain: lam(0xffb3a7, { flatShading: true }),
+  kelp: lam(0x3f9a4a, { side: THREE.DoubleSide }), anemone: lam(0xff8fcf), anemTip: lam(0xffd0ec, { emissive: 0x7a3060 }), seaRock: lam(0x6c7a7e, { flatShading: true }),
+  chest: lam(0x8a5a2b), chestBand: lam(0x4a4f58), gold: lam(0xffcc33, { emissive: 0x6a4a00 }), hull: lam(0x5a3d26), mast: lam(0x7a5a3a), sail: lam(0xd9d2c0, { side: THREE.DoubleSide }),
+  fish0: lam(0xffa62b), fish1: lam(0x3fa9f5), fish2: lam(0xffe66d), fish3: lam(0xff5d8f), bubble: new THREE.MeshLambertMaterial({ color: 0xcfefff, transparent: true, opacity: 0.35, depthWrite: false }),
 };
 
 // ---------------- instancing collector ----------------
@@ -363,6 +377,46 @@ const PROTO = {
   bush(g, m = 'bush') {
     part(g, 'ico0', m, 0, 0.5, 0, 1.3, 1.0, 1.3, rnd(0, 1), 0, rnd(0, 1));
     part(g, 'ico0', m, 0.8, 0.4, 0.3, 0.9, 0.7, 0.9, 0, rnd(0, 1), rnd(0, 1));
+  },
+  coral(g, i) {
+    const m = 'coral' + (i % 4), n = 5 + Math.floor(Math.random() * 3);
+    for (let k = 0; k < n; k++) {
+      const a = k * TAU / n + rnd(-0.3, 0.3), tilt = rnd(0.25, 0.6), h = rnd(1.2, 2.4);
+      part(g, 'cyl', m, Math.sin(a) * h * 0.35, h * 0.45, Math.cos(a) * h * 0.35, 0.16, h, 0.16, Math.cos(a) * tilt, 0, -Math.sin(a) * tilt);
+      part(g, 'sphere', m, Math.sin(a) * h * 0.65, h * 0.95, Math.cos(a) * h * 0.65, 0.3, 0.3, 0.3);
+    }
+  },
+  brainCoral(g) { part(g, 'ico', 'brain', 0, 0.5, 0, 1.4, 0.9, 1.3, rnd(-0.2, 0.2), rnd(0, TAU), 0); },
+  fanCoral(g, i) {
+    const m = 'coral' + ((i + 1) % 4);
+    part(g, 'box', m, 0, 1.2, 0, 2.2, 2.2, 0.14, 0, 0, 0);
+    for (const sx of [-0.8, 0, 0.8]) part(g, 'cyl', m, sx, 1.4, 0, 0.08, 2.6, 0.08, 0, 0, sx * 0.25);
+  },
+  kelp(g) {
+    let x = 0, z = 0;
+    for (let k = 0; k < 6; k++) {
+      const tilt = Math.sin(k * 0.9 + g.rotation.y) * 0.18;
+      part(g, 'cyl', 'kelp', x, k * 1.1 + 0.55, z, 0.09, 1.2, 0.09, 0, 0, tilt);
+      part(g, 'box', 'kelp', x + 0.35, k * 1.1 + 0.6, z, 0.6, 0.9, 0.04, 0, rnd(-0.4, 0.4), 0.5);
+      x += Math.sin(tilt) * 1.1;
+    }
+  },
+  anemone(g) {
+    part(g, 'sphere', 'anemone', 0, 0.25, 0, 0.6, 0.35, 0.6);
+    for (let k = 0; k < 10; k++) { const a = k * TAU / 10, t = rnd(0.3, 0.55); part(g, 'cyl', 'anemone', Math.sin(a) * 0.3, 0.75, Math.cos(a) * 0.3, 0.06, 1.0, 0.06, Math.cos(a) * t, 0, -Math.sin(a) * t); part(g, 'sphere', 'anemTip', Math.sin(a) * 0.62, 1.15, Math.cos(a) * 0.62, 0.12, 0.12, 0.12); }
+  },
+  seaRock(g) { part(g, 'dodec', 'seaRock', 0, 0.3, 0, 1.5, 0.9, 1.2, rnd(0, 0.6), 0, rnd(0, 0.6)); },
+  chest(g) {
+    part(g, 'box', 'chest', 0, 0.45, 0, 1.5, 0.9, 1.0); part(g, 'box', 'chestBand', 0, 0.45, 0, 1.55, 0.95, 0.2);
+    part(g, 'box', 'chest', 0, 1.05, -0.45, 1.5, 0.3, 1.0, -0.9, 0, 0);
+    for (let k = 0; k < 5; k++) part(g, 'sphere', 'gold', rnd(-0.5, 0.5), 0.95, rnd(-0.3, 0.3), 0.18, 0.18, 0.18);
+  },
+  shipwreck(g) {
+    part(g, 'box', 'hull', 0, 1.8, 0, 16, 4, 5.5, 0, 0, 0.18);
+    part(g, 'box', 'hull', 0, 3.9, 0, 15, 0.4, 6.2, 0, 0, 0.18);
+    part(g, 'cyl', 'mast', -2, 8.5, 0, 0.3, 11, 0.3, 0, 0, 0.3);
+    part(g, 'box', 'sail', -3.2, 10, 0, 5.5, 4.5, 0.1, 0, 0, 0.3);
+    part(g, 'cone', 'mast', 8.5, 4.2, 0, 1.2, 3, 2.4, 0, 0, -1.4);
   },
   rock(g) { part(g, 'dodec', 'rock', 0, 0.25, 0, 1.2, 0.7, 1.0, rnd(0, 0.6), 0, rnd(0, 0.6)); },
   tuft(g, m = 'grass') {
@@ -591,6 +645,33 @@ function makeUfo() {
   }
   return g;
 }
+function makeSchool() {
+  const g = new THREE.Group(), m = MAT['fish' + Math.floor(Math.random() * 4)], n = 5 + Math.floor(Math.random() * 6);
+  for (let i = 0; i < n; i++) {
+    const f = new THREE.Group();
+    const body = new THREE.Mesh(GEO.sphere, m); body.scale.set(0.45, 0.4, 0.9); f.add(body);
+    const tail = new THREE.Mesh(GEO.cone, m); tail.scale.set(0.35, 0.6, 0.1); tail.position.z = -1.0; tail.rotation.x = Math.PI / 2; f.add(tail);
+    f.position.set(rnd(-3, 3), rnd(-1.2, 1.2), rnd(-3, 3)); f.userData.bob = Math.random() * TAU; g.add(f);
+  }
+  return g;
+}
+function animateFish(dt) {
+  for (const s of fish) {
+    const d = s.userData, a = time * d.speed + d.phase;
+    s.position.set(d.cx + Math.cos(a) * d.r, d.y + Math.sin(time * 0.7 + d.phase) * 1.2, d.cz + Math.sin(a) * d.r);
+    s.rotation.y = -a; // face along the circle
+    for (const f of s.children) f.rotation.y = Math.sin(time * 6 + f.userData.bob) * 0.15;
+  }
+  if (bubbles) {
+    const b = bubbles.userData;
+    for (let i = 0; i < b.n; i++) {
+      const rise = ((time * b.spd[i] + b.ph[i]) % 40), sc = 0.12 + b.sz[i] * Math.min(1, rise / 6);
+      tmpM.makeScale(sc, sc, sc); tmpM.setPosition(b.x[i] + Math.sin(time * 1.3 + i) * 0.4, b.y[i] + rise, b.z[i]);
+      bubbles.setMatrixAt(i, tmpM);
+    }
+    bubbles.instanceMatrix.needsUpdate = true;
+  }
+}
 function animateUfos(dt) {
   for (const u of ufos) {
     const d = u.userData, a = time * 0.25 + d.phase;
@@ -601,7 +682,7 @@ function animateUfos(dt) {
 function buildWorld() {
   const W = WORLDS[world];
   const space = world === 'space';
-  craters = []; ufos = [];
+  craters = []; ufos = []; fish = []; bubbles = null;
   if (space) for (let i = 0; i < 24; i++) { const [x, z] = randomXZ(0, R + 20); craters.push({ x, z, r: rnd(8, 18), depth: rnd(2.5, 5.5) }); }
   scene = new THREE.Scene();
   scene.background = new THREE.Color(W.sky);
@@ -689,6 +770,27 @@ function buildWorld() {
       const gg = placeGroup(x, z, 1); gg.rotation.y = a; PROTO.grandstand(gg); collect(gg);
     }
     for (let i = 0; i < 14; i++) { const [x, z] = randomXZ(R * 0.35, R * 0.9); const gg = placeGroup(x, z, rnd(0.9, 1.2)); PROTO.billboard(gg, i); collect(gg); }
+  } else if (world === 'reef') {
+    scatter('coral', 260, 4, R + 5, 0.8, 1.6, null, 0); scatter('coral', 120, 4, R, 0.8, 1.5, null, 1); scatter('coral', 120, 4, R, 0.8, 1.5, null, 2); scatter('coral', 100, 4, R, 0.8, 1.5, null, 3);
+    scatter('brainCoral', 160, 0, R + 10, 0.7, 1.6);
+    scatter('fanCoral', 120, 6, R, 0.8, 1.5, null, 0); scatter('fanCoral', 80, 6, R, 0.8, 1.5, null, 2);
+    scatter('kelp', 220, 10, R + 10, 0.8, 1.6);
+    scatter('anemone', 200, 0, R, 0.8, 1.6);
+    scatter('seaRock', 260, 0, R + 40, 0.7, 2.4);
+    scatter('shell', 240, 0, R + 4, 0.8, 1.6); scatter('starfish', 120, 0, R + 4, 0.8, 1.3);
+    scatter('chest', 10, 20, R * 0.9, 0.9, 1.2);
+    for (let i = 0; i < 2; i++) { const [x, z] = randomXZ(R * 0.3, R * 0.8); const gg = placeGroup(x, z, rnd(0.9, 1.3)); PROTO.shipwreck(gg); collect(gg); }
+    for (let i = 0; i < 14; i++) {
+      const [x, z] = randomXZ(10, R * 0.9), sc = makeSchool();
+      sc.userData = { cx: x, cz: z, r: rnd(8, 18), speed: rnd(0.15, 0.3) * (Math.random() < 0.5 ? -1 : 1), phase: Math.random() * TAU, y: heightAt(x, z) + rnd(7, 16) };
+      scene.add(sc); fish.push(sc);
+    }
+    const n = 220, b = { n, x: new Float32Array(n), y: new Float32Array(n), z: new Float32Array(n), ph: new Float32Array(n), spd: new Float32Array(n), sz: new Float32Array(n) };
+    for (let i = 0; i < n; i++) { const [x, z] = randomXZ(0, R + 20); b.x[i] = x; b.z[i] = z; b.y[i] = heightAt(x, z); b.ph[i] = Math.random() * 40; b.spd[i] = rnd(2.5, 5); b.sz[i] = rnd(0.15, 0.5); }
+    bubbles = new THREE.InstancedMesh(GEO.sphere, MAT.bubble, n); bubbles.frustumCulled = false; bubbles.userData = b; scene.add(bubbles);
+    const sg = new THREE.PlaneGeometry(1800, 1800); sg.rotateX(Math.PI / 2); // the surface, seen from below
+    const surf = new THREE.Mesh(sg, new THREE.MeshPhongMaterial({ color: 0x5fc8ff, map: waterTex, transparent: true, opacity: 0.55, shininess: 120, specular: 0xffffff, side: THREE.DoubleSide, fog: false }));
+    surf.position.y = 48; scene.add(surf); waterMesh = surf;
   } else if (world === 'candy') {
     const dry = (x, z, h) => h > 1.2;
     scatter('lollipop', 220, 8, R * 0.95, 1.0, 2.6, dry);
@@ -704,7 +806,7 @@ function buildWorld() {
     scatter('rocket', 8, 25, R * 0.8, 0.9, 1.2);
     scatter('flag', 12, 15, R * 0.8, 1, 1);
   }
-  if (!space) for (let i = 0; i < 48; i++) {
+  if (!space && world !== 'reef') for (let i = 0; i < 48; i++) {
     const [x, z] = randomXZ(20, 480);
     const gg = new THREE.Group(); gg.position.set(x, rnd(55, 80), z); gg.rotation.y = Math.random() * TAU; gg.scale.setScalar(rnd(4, 9));
     PROTO.cloud(gg, world === 'candy' ? 'cotton' : 'cloud'); collect(gg);
@@ -1428,7 +1530,7 @@ function step(dt) {
   updateFoods(dt);
   updateCamera(dt, false);
   if (cloudMesh) cloudMesh.rotation.y += dt * 0.004;
-  animateUfos(dt);
+  animateUfos(dt); animateFish(dt);
   lavaTex.offset.x += dt * 0.03; lavaTex.offset.y += dt * 0.02;
   if (waterMesh) { waterMesh.material.map.offset.x += dt * 0.012; waterMesh.material.map.offset.y += dt * 0.007; }
   if (music.track) music.play(player.uniT > 0 ? TRACK_MAGIC : WORLD_TRACK[world]);
@@ -1487,7 +1589,14 @@ const RACE_LEAD = [
 const RACE_BASS = [];
 for (const r of [33, 33, 31, 33, 29, 29, 36, 31]) RACE_BASS.push([r,.5],[r,.5],[r,.5],[r,.5],[r,.5],[r,.5],[r+12,.5],[r,.5]);
 const TRACK_RACE = { bpm: 150, lead: RACE_LEAD, bass: RACE_BASS, style: 'race' };
-const WORLD_TRACK = { forest: TRACK_NORMAL, beach: TRACK_NORMAL, space: TRACK_SPACE, candy: TRACK_CANDY, race: TRACK_RACE };
+// Reef: an original slow, dreamy pentatonic tune in F major with bubbles.
+const REEF_LEAD = [
+  [69,1.5],[72,.5],[74,2],[72,1],[69,1],[65,2],[null,1],[65,.5],[67,.5],[69,2],[72,1],[74,1],[77,3],[null,1],
+  [76,1.5],[74,.5],[72,2],[69,1],[72,1],[74,2],[null,1],[74,.5],[72,.5],[69,2],[67,1],[65,1],[65,3],[null,1]];
+const REEF_BASS = [[41,4],[41,4],[46,4],[46,4],[41,4],[41,4],[43,4],[36,4]];
+const REEF_CH = [[[53,57,60],8],[[58,62,65],8],[[53,57,60],8],[[55,59,62],4],[[48,52,55],4]];
+const TRACK_REEF = { bpm: 84, lead: REEF_LEAD, bass: REEF_BASS, chords: REEF_CH, style: 'reef' };
+const WORLD_TRACK = { forest: TRACK_NORMAL, beach: TRACK_NORMAL, space: TRACK_SPACE, candy: TRACK_CANDY, race: TRACK_RACE, reef: TRACK_REEF };
 
 // iOS mutes Web Audio under the ring/silent switch unless an <audio> element is playing.
 // Looping a silent clip (started inside the user's tap) switches the session to playback mode.
@@ -1537,6 +1646,7 @@ const music = {
     if (track.bass) this.voices.push(voice(track.bass, (n, t, dur) => this.bass(n, t, dur)));
     if (track.chords) this.voices.push(voice(track.chords, (ch, t, dur) => this.chord(ch, t, dur)));
     if (track.style === 'chip' || track.style === 'candy' || track.style === 'race') this.voices.push(voice([[1, .5]], (n, t) => this.hat(t)));
+    if (track.style === 'reef') this.voices.push(voice([[1, .5]], (n, t) => { if (Math.random() < 0.35) this.blip(t); }));
   },
   stop() { this.track = null; this.voices = []; },
   tick() {
@@ -1583,6 +1693,10 @@ const music = {
       // toy piano: bright sine with a quick square bite, short decay
       this.osc('sine', f, t, t + 0.5, this.env(t, 0.004, 0.14, 0.3, 0.0001, 0.3, 0.05));
       this.osc('square', f * 2, t, t + 0.2, this.env(t, 0.003, 0.025, 0.08, 0.0001, 0.08, 0.03));
+    } else if (this.track.style === 'reef') {
+      // soft glassy tone with a slow swell and echo
+      const g = this.env(t, 0.18, 0.1, 0.3, 0.07, dur * 0.9, 0.5, this.echoIn);
+      this.osc('sine', f, t, t + dur + 0.7, g); this.osc('sine', f * 3, t, t + dur + 0.7, this.env(t, 0.18, 0.02, 0.3, 0.012, dur * 0.9, 0.5, this.echoIn));
     } else if (this.track.style === 'space') {
       const g = this.env(t, 0.25, 0.09, 0.3, 0.07, dur * 0.9, 0.4, this.echoIn);
       this.osc('sine', f, t, t + dur + 0.6, g); this.osc('triangle', f * 2, t, t + dur + 0.6, g, 4);
@@ -1611,6 +1725,11 @@ const music = {
     const g = this.env(t, 0.01, 0.22, 0.1, 0.12, dur * 0.8, 0.05);
     this.osc('triangle', this.freq(n), t, t + dur + 0.1, g);
   },
+  blip(t) { // a rising bubble pop
+    const o = this.ctx.createOscillator(); o.type = 'sine';
+    const f0 = 700 + Math.random() * 900; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * 2.2, t + 0.07);
+    o.connect(this.env(t, 0.003, 0.035, 0.06, 0.0001, 0.06, 0.03, this.echoIn)); o.start(t); o.stop(t + 0.12);
+  },
   hat(t) {
     const src = this.ctx.createBufferSource(); src.buffer = this.noise;
     const hp = this.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
@@ -1623,7 +1742,7 @@ const music = {
       for (const k of [1, 3]) for (const n of ch) this.osc('triangle', this.freq(n), t + k * beat, t + k * beat + 0.25, this.env(t + k * beat, 0.003, 0.05, 0.15, 0.0001, 0.15, 0.03));
       return;
     }
-    const space = this.track.style === 'space';
+    const space = this.track.style === 'space' || this.track.style === 'reef';
     // soft pad
     const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = space ? 420 : 700;
     const g = this.env(t, space ? 0.8 : 0.25, space ? 0.045 : 0.035, 0.3, space ? 0.04 : 0.03, dur, space ? 1.0 : 0.4); lp.connect(g);
@@ -1753,7 +1872,7 @@ function animate() {
     const a = time * 0.08;
     camera.position.set(Math.sin(a) * 60, 22, Math.cos(a) * 60); camera.lookAt(0, 4, 0);
     if (cloudMesh) cloudMesh.rotation.y += dt * 0.004;
-    animateUfos(dt); lavaTex.offset.x += dt * 0.03;
+    animateUfos(dt); animateFish(dt); lavaTex.offset.x += dt * 0.03;
   } else if (state !== 'showcase') step(dt);
   renderer.render(scene, camera);
 }

@@ -8,7 +8,7 @@ Everything is a static site (one HTML file plus Three.js), so there is no build 
 
 ## Features
 
-- Five worlds: forest, beach, space (snakes wear space suits there), candy and race, generated fresh every game
+- Six worlds: forest, beach, space (snakes wear space suits there), candy, race and reef, generated fresh every game
 - The race world has Hot Wheels style orange track pieces: kicker jumps with landing ramps, bumps and a
   loop. Snakes launch off the kickers and fly
 - Smooth third-person movement over rolling terrain
