@@ -24,6 +24,9 @@
   .card{width:128px;padding:18px 10px;border-radius:22px;background:rgba(255,255,255,.14);
     border:3px solid transparent;font-size:20px;font-weight:700;cursor:pointer}
   .card .emoji{font-size:56px;display:block}
+  .cards.chars .card{width:84px;padding:10px 6px;font-size:14px;border-radius:16px}
+  .cards.chars .card .emoji{font-size:36px}
+  .sub{margin:14px 0 4px;font-weight:700;opacity:.85}
   .card.sel{border-color:#ffd34a;background:rgba(255,255,255,.28)}
   .row{font-size:20px;display:flex;align-items:center;gap:12px}
   input[type=range]{width:220px}
@@ -64,7 +67,17 @@
     <div class="card" data-world="candy"><span class="emoji">🍭</span>Candy</div>
     <div class="card" data-world="race"><span class="emoji">🏎️</span>Race</div>
   </div>
-  <div class="row"><label for="cpu">Other snakes</label><input id="cpu" type="range" min="0" max="10" value="4"><b id="cpuVal">4</b></div>
+  <div class="sub">Your character</div>
+  <div class="cards chars">
+    <div class="card sel" data-char="snake"><span class="emoji">🐍</span>Snake</div>
+    <div class="card" data-char="crocodile"><span class="emoji">🐊</span>Croc</div>
+    <div class="card" data-char="caterpillar"><span class="emoji">🐛</span>Caterpillar</div>
+    <div class="card" data-char="dinosaur"><span class="emoji">🦖</span>Dino</div>
+    <div class="card" data-char="cat"><span class="emoji">🐱</span>Cat</div>
+    <div class="card" data-char="dog"><span class="emoji">🐶</span>Dog</div>
+    <div class="card" data-char="pig"><span class="emoji">🐷</span>Pig</div>
+  </div>
+  <div class="row"><label for="cpu">Other players</label><input id="cpu" type="range" min="0" max="10" value="4"><b id="cpuVal">4</b></div>
   <div class="row"><label><input id="musicOn" type="checkbox" checked> Music</label></div>
   <button id="play" class="btn">Play</button>
   <p class="hint">Touch the left or right side of the screen to turn. Touch both sides to go fast.
@@ -96,10 +109,29 @@ const WORLDS = {
   race:   { sky: 0x8fd0ff, fog: 0xc8e6f8, fogNear: 100, fogFar: 310, hemiSky: 0xdff2ff, hemiGround: 0x4a8a3a },
 };
 const GRAVITY = 28;
-const CPU_COLORS = [0xff8c42, 0x9b5de5, 0x3a86ff, 0xff5d8f, 0x2ec4b6, 0xffd166, 0xef476f, 0x8d6e63, 0x06d6a0, 0xf4a261];
 
 // ---------------- state ----------------
-let world = 'forest', cpuCount = 4, seed = 0;
+let world = 'forest', character = 'snake', cpuCount = 4, seed = 0;
+// playable characters: palette (player gets the first colour), body pattern and per-segment attachments
+// (attachment positions are in units of the local body radius; x = side, y = up, z = forward)
+const CHARACTERS = {
+  snake:       { palette: [0x3fb950, 0xff8c42, 0x9b5de5, 0x3a86ff, 0xff5d8f, 0x2ec4b6, 0xffd166, 0xef476f, 0x8d6e63, 0x06d6a0], pattern: 'spots', attach: [] },
+  crocodile:   { palette: [0x3f9a3a, 0x5aa84a, 0x2f7f55, 0x8aa83a], pattern: 'none', attach: [
+    { geo: 'spike', every: 1, pos: [0.35, 0.92, 0], scale: [0.8, 0.8, 0.8], tint: 0.72 }, { geo: 'spike', every: 1, pos: [-0.35, 0.92, 0], scale: [0.8, 0.8, 0.8], tint: 0.72 },
+    { geo: 'leg', every: 5, offset: 1, pos: [1.05, -0.35, 0], rot: [0, 0, -1.1], scale: [1.1, 1.5, 1.1], tint: 0.85 }, { geo: 'leg', every: 5, offset: 1, pos: [-1.05, -0.35, 0], rot: [0, 0, 1.1], scale: [1.1, 1.5, 1.1], tint: 0.85 } ] },
+  caterpillar: { palette: [0x8bd34a, 0xc9e03a, 0x4fc3a1, 0xffb347], pattern: 'bands', attach: [
+    { geo: 'legThin', every: 1, pos: [0.85, -0.45, 0], rot: [0, 0, -0.7], scale: [1, 1.6, 1], tint: 0.7 }, { geo: 'legThin', every: 1, pos: [-0.85, -0.45, 0], rot: [0, 0, 0.7], scale: [1, 1.6, 1], tint: 0.7 } ] },
+  dinosaur:    { palette: [0x2fa58a, 0x7a5fd0, 0xe0783a, 0x4caf50], pattern: 'none', attach: [
+    { geo: 'plate', every: 2, pos: [0, 1.05, 0], rot: [0, Math.PI / 4, 0], scale: [1.1, 1.2, 0.35], tint: 0.7 },
+    { geo: 'leg', every: 5, offset: 2, pos: [0.85, -0.55, 0], rot: [0, 0, -0.4], scale: [1.4, 1.8, 1.4], tint: 0.9 }, { geo: 'leg', every: 5, offset: 2, pos: [-0.85, -0.55, 0], rot: [0, 0, 0.4], scale: [1.4, 1.8, 1.4], tint: 0.9 } ] },
+  cat:         { palette: [0xf29b3c, 0x8e8e93, 0x4a4a4a, 0xf5f0e6], pattern: 'stripes', attach: [
+    { geo: 'leg', every: 4, offset: 1, pos: [0.8, -0.55, 0], rot: [0, 0, -0.45], scale: [1.1, 1.7, 1.1], tint: 0.95 }, { geo: 'leg', every: 4, offset: 1, pos: [-0.8, -0.55, 0], rot: [0, 0, 0.45], scale: [1.1, 1.7, 1.1], tint: 0.95 } ] },
+  dog:         { palette: [0xa0683a, 0xe3b96a, 0x3b3b3b, 0xf2e8d5], pattern: 'spots', attach: [
+    { geo: 'leg', every: 4, offset: 1, pos: [0.8, -0.55, 0], rot: [0, 0, -0.45], scale: [1.1, 1.7, 1.1], tint: 0.85 }, { geo: 'leg', every: 4, offset: 1, pos: [-0.8, -0.55, 0], rot: [0, 0, 0.45], scale: [1.1, 1.7, 1.1], tint: 0.85 } ] },
+  pig:         { palette: [0xffa6c1, 0xff8fb0, 0xf7c6d0, 0xe98aa6], pattern: 'none', attach: [
+    { geo: 'leg', every: 4, offset: 1, pos: [0.8, -0.55, 0], rot: [0, 0, -0.45], scale: [1.1, 1.7, 1.1], tint: 0.9 }, { geo: 'leg', every: 4, offset: 1, pos: [-0.8, -0.55, 0], rot: [0, 0, 0.45], scale: [1.1, 1.7, 1.1], tint: 0.9 } ] },
+};
+const CHARACTER_KINDS = Object.keys(CHARACTERS);
 let scene, camera, renderer, clock;
 let snakes = [], foods = [], player = null;
 let state = 'menu', score = 0, time = 0;
@@ -126,7 +158,9 @@ function fbm(x, z) { // -0.5 .. 0.5
   return v / sum - 0.5;
 }
 function heightAt(x, z) { const t = terrainAt(x, z); return ramps.length ? t + rampHeight(x, z) : t; }
+let FLAT = false;
 function terrainAt(x, z) {
+  if (FLAT) return 0;
   const r = Math.hypot(x, z);
   if (world === 'race') {
     let h = fbm(x * 0.02 + seed, z * 0.02 + seed) * 2.2;
@@ -773,35 +807,106 @@ function makeTubeGeometry() {
 }
 const NECK_LIFT = 0.9, NECK_LEN = 3.0;
 function bellyColor(c) { return c.clone().lerp(new THREE.Color(0xffd3a6), 0.72); }
-function buildHead(color) {
-  const g = new THREE.Group(), col = new THREE.Color(color), skin = lam(col.clone().lerp(new THREE.Color(0xffffff), 0.18)), peach = lam(bellyColor(col));
-  const white = lam(0xffffff), black = lam(0x161616);
-  const skull = new THREE.Mesh(new THREE.SphereGeometry(HEAD_R, 20, 16), skin); skull.scale.set(1.12, 0.98, 1.2); g.add(skull);
-  const snout = new THREE.Mesh(new THREE.SphereGeometry(HEAD_R * 0.72, 16, 12), peach); snout.scale.set(0.82, 0.64, 1.0); snout.position.set(0, -0.28, 0.9); g.add(snout);
-  const chin = new THREE.Mesh(new THREE.SphereGeometry(HEAD_R * 0.8, 14, 10), peach); chin.scale.set(0.9, 0.45, 0.95); chin.position.set(0, -0.6, 0.25); g.add(chin);
-  const eyeG = new THREE.SphereGeometry(0.44, 14, 12), irisG = new THREE.SphereGeometry(0.27, 12, 10), pupG = new THREE.SphereGeometry(0.15, 8, 6), glintG = new THREE.SphereGeometry(0.08, 6, 5);
+function addEyes(g, col, sx, y, z, size, slit) {
   const hsl = {}; col.getHSL(hsl);
-  const iris = hsl.h > 0.18 && hsl.h < 0.62 ? lam(0xe0a63a, { emissive: 0x3a2808 }) : lam(0x5cc46b, { emissive: 0x123a16 }); // amber eyes on green/blue snakes, green eyes otherwise
-  for (const sx of [-0.66, 0.66]) {
-    const e = new THREE.Mesh(eyeG, white); e.position.set(sx, 0.72, 0.62); g.add(e);
-    const i = new THREE.Mesh(irisG, iris); i.position.set(sx * 1.04, 0.74, 0.9); g.add(i);
-    const p = new THREE.Mesh(pupG, black); p.position.set(sx * 1.05, 0.75, 1.04); g.add(p);
-    const gl = new THREE.Mesh(glintG, white); gl.position.set(sx * 1.05 - 0.07, 0.88, 1.12); g.add(gl);
-    const lid = new THREE.Mesh(new THREE.SphereGeometry(0.47, 14, 8, 0, TAU, 0, Math.PI * 0.36), skin); lid.position.set(sx, 0.78, 0.62); lid.rotation.x = -0.3; g.add(lid);
-    const nostril = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), black); nostril.position.set(sx * 0.35, -0.12, 1.72); g.add(nostril);
+  const iris = hsl.h > 0.18 && hsl.h < 0.62 ? lam(0xe0a63a, { emissive: 0x3a2808 }) : lam(0x5cc46b, { emissive: 0x123a16 }); // amber eyes on green/blue, green otherwise
+  const white = lam(0xffffff), black = lam(0x161616), skin = lam(col.clone().lerp(new THREE.Color(0xffffff), 0.18));
+  const k = size / 0.44;
+  const eyeG = new THREE.SphereGeometry(size, 14, 12), irisG = new THREE.SphereGeometry(0.27 * k, 12, 10), pupG = new THREE.SphereGeometry(0.15 * k, 8, 6), glintG = new THREE.SphereGeometry(0.08 * k, 6, 5);
+  for (const sgn of [-1, 1]) {
+    const x = sgn * sx;
+    const e = new THREE.Mesh(eyeG, white); e.position.set(x, y, z); g.add(e);
+    const i = new THREE.Mesh(irisG, iris); i.position.set(x * 1.04, y + 0.02, z + 0.28 * k); g.add(i);
+    const p = new THREE.Mesh(pupG, black); p.position.set(x * 1.05, y + 0.03, z + 0.42 * k); if (slit) p.scale.set(0.45, 1.5, 1); g.add(p);
+    const gl = new THREE.Mesh(glintG, white); gl.position.set(x * 1.05 - 0.07 * k, y + 0.16 * k, z + 0.5 * k); g.add(gl);
+    const lid = new THREE.Mesh(new THREE.SphereGeometry(size * 1.07, 14, 8, 0, TAU, 0, Math.PI * 0.36), skin); lid.position.set(x, y + 0.06 * k, z); lid.rotation.x = -0.3; g.add(lid);
   }
-  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.045, 6, 20, Math.PI * 0.8), black);
-  smile.position.set(0, -0.38, 1.76); smile.rotation.set(0.55, 0, Math.PI + Math.PI * 0.1); g.add(smile);
-  for (const sx of [-0.42, 0.42]) { const fang = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.22, 6), white); fang.position.set(sx * 0.75, -0.66, 1.72); fang.rotation.x = Math.PI; g.add(fang); }
-  const tongue = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.8), lam(0xff3355)); tongue.position.set(0, -0.5, 1.75); g.add(tongue);
+}
+function buildHead(kind, color) {
+  const g = new THREE.Group(), col = new THREE.Color(color), skin = lam(col.clone().lerp(new THREE.Color(0xffffff), 0.18)), peach = lam(bellyColor(col)), dark = lam(col.clone().multiplyScalar(0.7));
+  const white = lam(0xffffff), black = lam(0x161616), pink = lam(0xff8fb0), nose = lam(0x2a2024);
+  const sph = (r, mat, x, y, z, sx = 1, sy = 1, sz = 1) => { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); g.add(m); return m; };
+  const cone = (r, h, mat, x, y, z, rx = 0, ry = 0, rz = 0) => { const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 8), mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); g.add(m); return m; };
+  const smile = (r, y, z, tilt = 0.55) => { const m = new THREE.Mesh(new THREE.TorusGeometry(r, 0.045, 6, 20, Math.PI * 0.8), black); m.position.set(0, y, z); m.rotation.set(tilt, 0, Math.PI + Math.PI * 0.1); g.add(m); };
+  const teeth = (n, z0, z1, y, x, mat = white, size = 0.07) => { for (let i = 0; i < n; i++) for (const sgn of [-1, 1]) { const t = cone(size, size * 3, mat, sgn * x, y, z0 + (z1 - z0) * i / Math.max(n - 1, 1), Math.PI); } };
+  if (kind === 'crocodile') {
+    sph(HEAD_R, skin, 0, 0, 0, 1.05, 0.8, 1.0);
+    sph(HEAD_R * 0.8, skin, 0, -0.2, 1.3, 0.95, 0.5, 1.7);                 // long flat snout
+    sph(HEAD_R * 0.78, peach, 0, -0.5, 1.2, 0.9, 0.32, 1.6);               // lower jaw
+    teeth(5, 0.6, 2.2, -0.42, 0.6);
+    addEyes(g, col, 0.6, 0.72, 0.1, 0.36);
+    for (const sgn of [-1, 1]) sph(0.06, black, sgn * 0.3, 0.1, 2.55);     // nostrils
+    for (let i = 0; i < 3; i++) cone(0.2, 0.45, dark, 0, 0.95 - i * 0.1, -0.5 - i * 0.35);
+  } else if (kind === 'caterpillar') {
+    sph(HEAD_R, skin, 0, 0.05, 0, 1.08, 1.05, 1.0);
+    addEyes(g, col, 0.5, 0.35, 0.85, 0.42);
+    for (const sgn of [-1, 1]) {
+      const a = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.3, 6), dark); a.position.set(sgn * 0.45, 1.3, 0.2); a.rotation.set(-0.5, 0, sgn * -0.45); g.add(a);
+      sph(0.16, lam(0xff6fb5), sgn * 0.78, 1.85, 0.52);
+      sph(0.18, lam(0xff9ec4, { transparent: true, opacity: 0.8 }), sgn * 0.85, -0.1, 0.75);  // rosy cheeks
+    }
+    smile(0.42, -0.35, 1.0);
+  } else if (kind === 'dinosaur') {
+    sph(HEAD_R, skin, 0, 0.05, 0, 1.0, 1.0, 1.1);
+    sph(HEAD_R * 0.82, skin, 0, -0.2, 1.0, 0.82, 0.66, 1.15);              // snout
+    sph(HEAD_R * 0.8, peach, 0, -0.55, 0.85, 0.78, 0.35, 1.15);            // jaw
+    teeth(4, 0.7, 1.85, -0.5, 0.52);
+    addEyes(g, col, 0.55, 0.55, 0.55, 0.38);
+    for (const sgn of [-1, 1]) sph(0.07, black, sgn * 0.32, 0.12, 1.95);
+    for (let i = 0; i < 3; i++) cone(0.22, 0.55, dark, 0, 1.05 - i * 0.15, -0.3 - i * 0.4, -0.3);
+  } else if (kind === 'cat') {
+    sph(HEAD_R, skin, 0, 0, 0, 1.12, 1.0, 1.0);
+    sph(HEAD_R * 0.62, peach, 0, -0.3, 0.85, 1.05, 0.62, 0.9);             // muzzle
+    sph(0.14, lam(0xff7fa0), 0, -0.02, 1.4);                               // nose
+    smile(0.3, -0.42, 1.35, 0.7);
+    addEyes(g, col, 0.5, 0.4, 0.92, 0.4, true);
+    for (const sgn of [-1, 1]) {
+      cone(0.36, 0.8, skin, sgn * 0.72, 1.05, -0.1, -0.15, 0, sgn * -0.35); cone(0.2, 0.55, pink, sgn * 0.72, 1.05, -0.02, -0.15, 0, sgn * -0.35);
+      for (let w = 0; w < 3; w++) { const wk = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.025, 0.025), white); wk.position.set(sgn * 0.95, -0.2 - w * 0.12, 1.25); wk.rotation.set(0, sgn * -0.35, (w - 1) * 0.18); g.add(wk); }
+    }
+  } else if (kind === 'dog') {
+    sph(HEAD_R, skin, 0, 0, 0, 1.12, 1.02, 1.05);
+    sph(HEAD_R * 0.7, peach, 0, -0.22, 1.0, 0.8, 0.7, 1.0);                // muzzle
+    sph(0.24, nose, 0, 0.08, 1.85);                                        // nose
+    smile(0.36, -0.5, 1.4, 0.7);
+    const tongue = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.55), lam(0xff6f9c)); tongue.position.set(0.12, -0.7, 1.45); tongue.rotation.x = 0.4; g.add(tongue);
+    addEyes(g, col, 0.5, 0.45, 0.9, 0.4);
+    for (const sgn of [-1, 1]) { const ear = sph(0.5, dark, sgn * 1.0, 0.35, -0.15, 0.4, 1.1, 0.7); ear.rotation.z = sgn * 0.35; }
+  } else if (kind === 'pig') {
+    sph(HEAD_R, skin, 0, 0, 0, 1.15, 1.05, 1.05);
+    const snout = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.58, 0.5, 16), lam(col.clone().multiplyScalar(0.92))); snout.position.set(0, -0.12, 1.25); snout.rotation.x = Math.PI / 2; g.add(snout);
+    for (const sgn of [-1, 1]) { sph(0.09, nose, sgn * 0.2, -0.1, 1.52); cone(0.3, 0.6, skin, sgn * 0.75, 1.0, 0.0, -0.3, 0, sgn * -0.5); sph(0.2, lam(0xff6f9c, { transparent: true, opacity: 0.7 }), sgn * 0.9, -0.25, 0.75); }
+    smile(0.5, -0.55, 1.05, 0.8);
+    addEyes(g, col, 0.48, 0.4, 0.92, 0.36);
+  } else { // snake
+    sph(HEAD_R, skin, 0, 0, 0, 1.12, 0.98, 1.2);
+    sph(HEAD_R * 0.72, peach, 0, -0.28, 0.9, 0.82, 0.64, 1.0);             // snout
+    sph(HEAD_R * 0.8, peach, 0, -0.6, 0.25, 0.9, 0.45, 0.95);              // chin
+    addEyes(g, col, 0.66, 0.72, 0.62, 0.44);
+    for (const sgn of [-1, 1]) { sph(0.06, black, sgn * 0.35, -0.12, 1.72); cone(0.07, 0.22, white, sgn * 0.75, -0.66, 1.72, Math.PI); }
+    smile(0.42, -0.38, 1.76);
+    const tongue = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.8), lam(0xff3355)); tongue.position.set(0, -0.5, 1.75); g.add(tongue);
+  }
   return g;
 }
+// body attachments (legs, spikes, plates) as instanced meshes placed from the ring frames
+const ATT_GEO = {
+  leg: new THREE.CylinderGeometry(0.2, 0.27, 1, 8), legThin: new THREE.CylinderGeometry(0.09, 0.1, 1, 6),
+  spike: new THREE.ConeGeometry(0.28, 0.7, 6), plate: new THREE.ConeGeometry(0.55, 1.0, 4),
+};
+function makeAttach(spec, color) {
+  const im = new THREE.InstancedMesh(ATT_GEO[spec.geo], lam(color.clone().multiplyScalar(spec.tint ?? 1)), Math.ceil(MAX_SEG / spec.every) + 1);
+  im.frustumCulled = false; im.count = 0;
+  const local = new THREE.Matrix4().compose(new THREE.Vector3(...spec.pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...(spec.rot || [0, 0, 0]))), new THREE.Vector3(...(spec.scale || [1, 1, 1])));
+  return { im, local, every: spec.every, offset: spec.offset || 0 };
+}
+const vS = new THREE.Vector3(), vN = new THREE.Vector3(), vT = new THREE.Vector3(), vR = new THREE.Vector3();
 const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 class Snake {
-  constructor(isPlayer, color) {
-    this.isPlayer = isPlayer;
+  constructor(isPlayer, kind, color) {
+    this.isPlayer = isPlayer; this.kind = kind; this.pattern = CHARACTERS[kind].pattern;
     this.color = new THREE.Color(color);
     this.speed = isPlayer ? PLAYER_SPEED : CPU_SPEED;
     this.aggro = isPlayer ? 0 : rnd(0.3, 1.0);
@@ -813,9 +918,9 @@ class Snake {
     this.body.frustumCulled = false;
     this.ringC = new Float32Array(MAX_RINGS * 4);
     this.cDark = this.color.clone().multiplyScalar(0.6); this.cBelly = bellyColor(this.color); this.cSpot = this.color.clone().lerp(new THREE.Color(0xffffff), 0.35);
-    this.head = buildHead(this.color); this.head.visible = false;
+    this.head = buildHead(kind, this.color); this.head.visible = false;
     this.headMat = this.head.children[0].material;
-    this.uniHead = buildHead(0xffffff); addUnicornBits(this.uniHead); this.uniHead.visible = false;
+    this.uniHead = buildHead(kind, 0xffffff); addUnicornBits(this.uniHead); this.uniHead.visible = false;
     this.uniHeadMat = this.uniHead.children[0].material;
     this.uniT = 0;
     // space suit: glass helmet, collar ring and a little backpack, shown in the space world
@@ -829,7 +934,9 @@ class Snake {
     this.fire = new THREE.Group(); this.fire.visible = false;
     for (let i = 0; i < 14; i++) this.fire.add(new THREE.Mesh(fireGeo, fireMats[i % 3]));
     this.burnT = 0; this.shrinkT = 0;
-    scene.add(this.body, this.head, this.uniHead, this.fire, this.helmet, this.gun);
+    this.attach = CHARACTERS[kind].attach.map(a => makeAttach(a, this.color));
+    this.frames = new Float32Array(MAX_RINGS * 9);
+    scene.add(this.body, this.head, this.uniHead, this.fire, this.helmet, this.gun, ...this.attach.map(a => a.im));
     this.wobble = Math.random() * 100; this.thinkT = 0; this.target = null; this.skip = new Map();
     this.jinkT = rnd(3, 8); this.jinkLeft = 0; this.jinkDir = 1; // every few seconds a CPU snake makes a short random swerve, so no steady-state pattern can trap it
     this.x = 0; this.z = 0; this.y = 0; this.vy = 0; this.climb = 0; this.air = false; this.heading = 0; this.trail = []; this.trailLen = 0;
@@ -847,7 +954,7 @@ class Snake {
     this.placeSegments(); this.placeHead();
   }
   die() {
-    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.gun.visible = false; this.armT = 0; this.geo.setDrawRange(0, 0); this.setBurning(false); this.uniT = 0;
+    this.alive = false; this.head.visible = false; this.uniHead.visible = false; this.helmet.visible = false; this.gun.visible = false; this.armT = 0; this.geo.setDrawRange(0, 0); for (const a of this.attach) a.im.count = 0; this.setBurning(false); this.uniT = 0;
   }
   setUnicorn(on) {
     this.uniT = on ? UNICORN_TIME : 0;
@@ -1034,10 +1141,13 @@ class Snake {
       const i = j >> 1;
       if (rainbow) tmpC.setHSL(((i * 0.045 - time * 0.4) % 1 + 1) % 1, 0.95, 0.55);
       else if (space) tmpC.copy(i % 4 === 3 ? this.color : SUIT_C);
+      else if (this.pattern === 'stripes') tmpC.copy(i % 4 < 2 ? this.color : this.cDark);
+      else if (this.pattern === 'bands') tmpC.copy(this.color).lerp(this.cSpot, i % 2 ? 0.55 : 0);
       else tmpC.copy(this.color);
       // belly: peach with alternating scute shading; rainbow/suit keep a lighter underside
       if (rainbow || space) tmpC2.copy(tmpC).lerp(SUIT_C, 0.45); else tmpC2.copy(this.cBelly).multiplyScalar(j % 2 ? 1 : 0.9);
       const cx = c[j * 4], cy = c[j * 4 + 1], cz = c[j * 4 + 2], r = c[j * 4 + 3];
+      const F = this.frames, fo = j * 9; F[fo] = sx; F[fo + 1] = 0; F[fo + 2] = sz; F[fo + 3] = nx; F[fo + 4] = ny; F[fo + 5] = nz; F[fo + 6] = tx; F[fo + 7] = ty; F[fo + 8] = tz;
       for (let v = 0; v < RSEG; v++) {
         const ca = RING_COS[v], sa = RING_SIN[v];
         const ox = sx * ca + nx * sa, oy = ny * sa, oz = sz * ca + nz * sa;
@@ -1046,7 +1156,7 @@ class Snake {
         nrm[o] = ox; nrm[o + 1] = oy; nrm[o + 2] = oz;
         const belly = clamp((-oy - 0.12) / 0.3, 0, 1);
         let cr = tmpC.r + (tmpC2.r - tmpC.r) * belly, cg = tmpC.g + (tmpC2.g - tmpC.g) * belly, cb = tmpC.b + (tmpC2.b - tmpC.b) * belly;
-        if (!rainbow && !space && belly < 0.5) { // light speckles on the back, fixed to the body
+        if (this.pattern === 'spots' && !rainbow && !space && belly < 0.5) { // light speckles on the back, fixed to the body
           const hsh = Math.sin(j * 12.9898 + v * 78.233) * 43758.5453, fr = hsh - Math.floor(hsh);
           if (fr > 0.9) { cr += (this.cSpot.r - cr) * 0.9; cg += (this.cSpot.g - cg) * 0.9; cb += (this.cSpot.b - cb) * 0.9; }
         }
@@ -1055,6 +1165,17 @@ class Snake {
     }
     this.geo.setDrawRange(0, (rings - 1) * RSEG * 6);
     for (const name of ['position', 'normal', 'color']) this.geo.attributes[name].needsUpdate = true;
+    // 3. attachments: one instance per qualifying segment, oriented by that ring's frame and scaled by its radius
+    for (const a of this.attach) {
+      let n = 0;
+      for (let q = a.offset; q < this.len - 3; q += a.every) {
+        const j = 2 * q + 2, fo = j * 9, r = c[j * 4 + 3];
+        vS.set(this.frames[fo], this.frames[fo + 1], this.frames[fo + 2]); vN.set(this.frames[fo + 3], this.frames[fo + 4], this.frames[fo + 5]); vT.set(this.frames[fo + 6], this.frames[fo + 7], this.frames[fo + 8]);
+        tmpM.makeBasis(vS, vN, vT); tmpM.scale(vR.set(r, r, r)); tmpM.setPosition(c[j * 4], c[j * 4 + 1], c[j * 4 + 2]); tmpM.multiply(a.local);
+        a.im.setMatrixAt(n++, tmpM);
+      }
+      a.im.count = n; a.im.instanceMatrix.needsUpdate = true;
+    }
   }
 }
 const tmpM = new THREE.Matrix4();
@@ -1191,10 +1312,11 @@ function startGame() {
   seed = Math.random() * 1000;
   foods = []; snakes = []; bolts = []; score = 0; time = 0; clearInput();
   buildWorld();
-  player = new Snake(true, 0x3fb950);
+  player = new Snake(true, character, CHARACTERS[character].palette[0]);
   player.spawn(0, 0, Math.random() * TAU);
   for (let i = 0; i < cpuCount; i++) {
-    const s = new Snake(false, CPU_COLORS[i % CPU_COLORS.length]);
+    const kind = CHARACTER_KINDS[Math.floor(Math.random() * CHARACTER_KINDS.length)], pal = CHARACTERS[kind].palette;
+    const s = new Snake(false, kind, pal[kind === 'snake' ? 1 + i % (pal.length - 1) : Math.floor(Math.random() * pal.length)]);
     const [x, z] = randomSpawn(); s.spawn(x, z, Math.random() * TAU); snakes.push(s);
   }
   snakes.unshift(player);
@@ -1473,8 +1595,11 @@ muteBtn.addEventListener('click', () => { music.setEnabled(!music.enabled); if (
 musicChk.addEventListener('change', () => music.setEnabled(musicChk.checked));
 document.addEventListener('visibilitychange', () => { if (music.ctx) { if (document.hidden) music.ctx.suspend(); else if (state !== 'menu') { music.resume(); music.unlock(); } } });
 document.getElementById('again').addEventListener('click', () => { music.unlock(); music.resume(); });
-document.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => {
-  document.querySelectorAll('.card').forEach(x => x.classList.remove('sel')); c.classList.add('sel'); world = c.dataset.world;
+document.querySelectorAll('.card[data-char]').forEach(c => c.addEventListener('click', () => {
+  document.querySelectorAll('.card[data-char]').forEach(x => x.classList.remove('sel')); c.classList.add('sel'); character = c.dataset.char;
+}));
+document.querySelectorAll('.card[data-world]').forEach(c => c.addEventListener('click', () => {
+  document.querySelectorAll('.card[data-world]').forEach(x => x.classList.remove('sel')); c.classList.add('sel'); world = c.dataset.world;
 }));
 const cpuIn = document.getElementById('cpu');
 cpuIn.addEventListener('input', () => { cpuCount = +cpuIn.value; document.getElementById('cpuVal').textContent = cpuIn.value; });
@@ -1488,6 +1613,21 @@ document.getElementById('toMenu').addEventListener('click', toMenu);
 const homeBtn = document.getElementById('home');
 homeBtn.addEventListener('click', toMenu);
 
+// ?showcase=1: every character side by side on flat ground, facing the camera (for checking the models)
+function showcase() {
+  disposeScene(); FLAT = true; ramps = []; pools = []; craters = []; ufos = []; snakes = []; foods = []; bolts = [];
+  scene = new THREE.Scene(); scene.background = new THREE.Color(0xbfe3ff);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x667744, 1.0)); const sun = new THREE.DirectionalLight(0xfff3d6, 1.6); sun.position.set(30, 60, -40); scene.add(sun);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), lam(0x6fae4a)); ground.rotation.x = -Math.PI / 2; scene.add(ground);
+  CHARACTER_KINDS.forEach((k, i) => {
+    const sn = new Snake(i === 0, k, CHARACTERS[k].palette[0]), x0 = (i - 3) * 6.5;
+    sn.spawn(x0, 0, Math.PI); sn.len = 14; sn.trail = [];
+    for (let t = 0; t <= 40; t++) sn.trail.push({ x: x0 + Math.sin(t * 0.3) * 1.2, z: t * SEG_SPACING, y: 0 });
+    sn.trailLen = 40; sn.placeSegments(); sn.placeHead(); snakes.push(sn);
+  });
+  player = snakes[0]; state = 'showcase'; menu.classList.add('hidden');
+  if (new URLSearchParams(location.search).get('showcase') === 'high') { camera.position.set(-6, 16, -6); camera.lookAt(0, 0, 9); } else { camera.position.set(0, 7, -16); camera.lookAt(0, 1.2, 4); }
+}
 const NO_MUSIC = new URLSearchParams(location.search).has('nomusic'), FRONT_CAM = new URLSearchParams(location.search).has('frontcam');
 
 // ---------------- renderer / loop ----------------
@@ -1508,7 +1648,7 @@ function animate() {
     camera.position.set(Math.sin(a) * 60, 22, Math.cos(a) * 60); camera.lookAt(0, 4, 0);
     if (cloudMesh) cloudMesh.rotation.y += dt * 0.004;
     animateUfos(dt); lavaTex.offset.x += dt * 0.03;
-  } else step(dt);
+  } else if (state !== 'showcase') step(dt);
   renderer.render(scene, camera);
 }
 animate();
@@ -1516,8 +1656,10 @@ animate();
 // ?play=forest|beach&cpu=N starts a game immediately (handy for testing)
 {
   const q = new URLSearchParams(location.search);
-  if (q.get('play')) {
+  if (q.has('showcase')) showcase();
+  else if (q.get('play')) {
     if (WORLDS[q.get('play')]) world = q.get('play');
+    if (CHARACTERS[q.get('char')]) character = q.get('char');
     if (q.get('cpu') !== null) cpuCount = clamp(+q.get('cpu') || 0, 0, 10);
     startGame();
     if (q.get('at') === 'pool' && pools.length) { const p = pools[0]; player.spawn(p.x, p.z + p.r + 14, Math.PI); updateCamera(0, true); }

@@ -43,5 +43,5 @@ python3 -m http.server 8000
 ```
 
 `index.html?play=forest&cpu=4` (or `play=beach`, `play=space`, `play=candy`, `play=race`) skips the menu, which is handy while iterating.
-Add `&at=pool` to start next to a lava pool, `&at=ramp` to start lined up on a ramp, `&burn=1` to start on fire, `&unicorn=1` to start in unicorn mode, `&gun=1` to start armed, `&nomusic=1` to skip audio.
+Add `&at=pool` to start next to a lava pool, `&at=ramp` to start lined up on a ramp, `&burn=1` to start on fire, `&unicorn=1` to start in unicorn mode, `&gun=1` to start armed, ``&nomusic=1` to skip audio.nomusic=1` to skip audio, `&char=dog` (or any character) to pick the player character, `&frontcam=1` to look at the player's face, `&debug=1` to expose held input on `window.__dbg`. `?showcase=1` (or `?showcase=high`) lines up every character on flat ground.
 Bump `CACHE` in `sw.js` when you want to force clients to refetch assets.
