@@ -1277,7 +1277,7 @@ class Snake {
       this.trailLen -= Math.hypot(a.x - b.x, a.z - b.z); this.trail.pop();
     }
     this.placeSegments(); this.placeHead();
-    if (inPool(this.x, this.z)) this.ignite();
+    if (inPool(this.x, this.z) && this.y - g < 2.5) this.ignite(); // only when close to the lava, not flying over it
     this.updateFire(dt); this.updateSick(dt); this.updateBulges(dt); this.updateUnicorn(dt); this.updateWeapon(dt); this.updateJet(dt);
   }
   placeHead() {
