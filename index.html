@@ -53,6 +53,7 @@
   <span>🍎 <b id="score">0</b></span>
   <span>📏 <b id="len">6</b></span>
   <span>🐍 <b id="alive">0</b></span>
+  <span id="uni" class="hidden">🦄 <b id="uniT">30</b>s</span>
 </div>
 <button id="mute" class="hidden" aria-label="Toggle music">🔊</button>
 <button id="home" class="hidden" aria-label="Start over">🏠</button>
@@ -706,7 +707,7 @@ function buildWorld() {
 
 // ---------------- food ----------------
 const FOOD_TYPES = ['apple', 'banana', 'popsicle'];
-const UNICORN_CHANCE = 0.08, UNICORN_TIME = 20;
+const UNICORN_CHANCE = 0.08, UNICORN_TIME = 30, UNICORN_EXTEND = 5;
 const BLASTER_CHANCE = UNICORN_CHANCE * 2, BLASTER_TIME = 15, BOLT_SPEED = 42, BOLT_LIFE = 1.6;
 const RAINBOW = [0xff3b5c, 0xff8c1a, 0xffe03a, 0x3ddc84, 0x3aa0ff, 0x9b5de5];
 const FG = {
@@ -1227,6 +1228,7 @@ function eatFood(s, i) {
   const f = foods[i]; scene.remove(f.g); foods.splice(i, 1);
   s.len = Math.min(MAX_SEG, s.len + 1);
   if (f.type === 'unicorn') { s.setUnicorn(true); if (s.isPlayer) { score += 3; music.sparkle(); } }
+  else if (s.uniT > 0) s.uniT = Math.min(UNICORN_TIME, s.uniT + UNICORN_EXTEND); // any snack keeps unicorn mode going a little longer
   if (f.type === 'blaster') { s.arm(); if (s.isPlayer) { score += 2; music.powerup(); } }
   if (s.isPlayer) score += 1;
   if (foods.length < FOOD_COUNT) spawnFood();
@@ -1353,6 +1355,7 @@ function step(dt) {
   scoreEl.textContent = score; lenEl.textContent = player.len;
   const armed = player.alive && player.armT > 0;
   fireBtn.classList.toggle('hidden', !armed); if (armed) fireTEl.textContent = Math.ceil(player.armT);
+  const uni = player.uniT > 0; uniEl.classList.toggle('hidden', !uni); if (uni) uniTEl.textContent = Math.ceil(player.uniT);
   aliveEl.textContent = snakes.filter(s => s.alive && !s.isPlayer).length;
 }
 
@@ -1589,6 +1592,7 @@ const menu = document.getElementById('menu'), over = document.getElementById('ov
 const scoreEl = document.getElementById('score'), lenEl = document.getElementById('len'), aliveEl = document.getElementById('alive');
 const muteBtn = document.getElementById('mute'), musicChk = document.getElementById('musicOn');
 const fireBtn = document.getElementById('fire'), fireTEl = document.getElementById('fireT');
+const uniEl = document.getElementById('uni'), uniTEl = document.getElementById('uniT');
 fireBtn.addEventListener('pointerdown', e => { e.preventDefault(); fireHeld = true; music.resume(); });
 window.addEventListener('pointerup', () => { fireHeld = false; }); window.addEventListener('pointercancel', () => { fireHeld = false; });
 muteBtn.addEventListener('click', () => { music.setEnabled(!music.enabled); if (music.enabled) { music.unlock(); music.resume(); } });
