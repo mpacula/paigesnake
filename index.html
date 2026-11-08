@@ -1481,6 +1481,7 @@ function readInput(s) {
   if (keys.has('ArrowRight') || keys.has('d')) r = true;
   s.boost = (l && r) || keys.has(' ') || keys.has('Shift') || keys.has('ArrowUp');
   s.turn = (l && r) ? 0 : (l ? 1 : 0) - (r ? 1 : 0);
+  if (camMode === 'front') s.turn = -s.turn; // facing the camera: touching the left of the screen moves the character screen-left
   s.firing = fireHeld || keys.has('f') || keys.has('Enter');
   s.thrust = jetHeld || keys.has('j') || keys.has('ArrowDown');
 }
@@ -1494,6 +1495,7 @@ function updateCamera(dt, snap) {
   const hy = player.y;
   if (FRONT_CAM) { camPos.set(player.x + fx * 7, hy + 3.5, player.z + fz * 7); camLook.set(player.x, hy + 1.6, player.z); camera.position.copy(camPos); camera.lookAt(camLook); return; }
   if (camMode === 'top') { camPos.set(player.x - fx * 9, hy + 38, player.z - fz * 9); camLook.set(player.x + fx * 4, hy, player.z + fz * 4); }
+  else if (camMode === 'front') { camPos.set(player.x + fx * 14, hy + 30, player.z + fz * 14); camLook.set(player.x - fx * 3, hy + 1, player.z - fz * 3); }
   else { camPos.set(player.x - fx * 17, hy + 12, player.z - fz * 17); camLook.set(player.x + fx * 4, hy + 1, player.z + fz * 4); }
   camPos.y = Math.max(camPos.y, heightAt(camPos.x, camPos.z) + 2.5);
   if (snap) { camera.position.copy(camPos); camLookS.copy(camLook); }
@@ -1851,7 +1853,8 @@ document.getElementById('toMenu').addEventListener('click', toMenu);
 const homeBtn = document.getElementById('home');
 homeBtn.addEventListener('click', toMenu);
 const camBtn = document.getElementById('cam');
-function toggleCam() { camMode = camMode === 'chase' ? 'top' : 'chase'; camBtn.textContent = camMode === 'top' ? '🛰️' : '📷'; }
+const CAM_MODES = ['chase', 'top', 'front'], CAM_ICONS = { chase: '📷', top: '🛰️', front: '🎥' };
+function toggleCam() { camMode = CAM_MODES[(CAM_MODES.indexOf(camMode) + 1) % CAM_MODES.length]; camBtn.textContent = CAM_ICONS[camMode]; }
 camBtn.addEventListener('click', toggleCam);
 window.addEventListener('keydown', e => { if (e.key === 'c' && state === 'playing') toggleCam(); });
 
