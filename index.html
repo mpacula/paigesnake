@@ -1495,7 +1495,7 @@ function updateCamera(dt, snap) {
   const hy = player.y;
   if (FRONT_CAM) { camPos.set(player.x + fx * 7, hy + 3.5, player.z + fz * 7); camLook.set(player.x, hy + 1.6, player.z); camera.position.copy(camPos); camera.lookAt(camLook); return; }
   if (camMode === 'top') { camPos.set(player.x - fx * 9, hy + 38, player.z - fz * 9); camLook.set(player.x + fx * 4, hy, player.z + fz * 4); }
-  else if (camMode === 'front') { camPos.set(player.x + fx * 14, hy + 30, player.z + fz * 14); camLook.set(player.x - fx * 3, hy + 1, player.z - fz * 3); }
+  else if (camMode === 'front') { camPos.set(player.x + fx * 24, hy + 22, player.z + fz * 24); camLook.set(player.x - fx * 4, hy + 1, player.z - fz * 4); }
   else { camPos.set(player.x - fx * 17, hy + 12, player.z - fz * 17); camLook.set(player.x + fx * 4, hy + 1, player.z + fz * 4); }
   camPos.y = Math.max(camPos.y, heightAt(camPos.x, camPos.z) + 2.5);
   if (snap) { camera.position.copy(camPos); camLookS.copy(camLook); }
